@@ -1,8 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
+import 'package:super_editor_markdown/super_editor_markdown.dart';
 
 /// Markdown serialization demo.
 ///
@@ -61,11 +61,12 @@ class _MarkdownSerializationDemoState extends State<MarkdownSerializationDemo> {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: SuperEditor.standard(
+            child: SuperEditor(
               key: _docKey,
               editor: _docEditor,
-              maxWidth: 600,
-              padding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
+              stylesheet: defaultStylesheet.copyWith(
+                documentPadding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
+              ),
             ),
           ),
         ),

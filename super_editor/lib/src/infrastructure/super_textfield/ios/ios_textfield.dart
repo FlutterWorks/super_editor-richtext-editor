@@ -1,26 +1,26 @@
-import 'dart:ui';
-
+import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/default_editor/super_editor.dart';
 import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
+import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
+import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/attributed_text_editing_controller.dart';
+import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/hint_text.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/text_scrollview.dart';
+import 'package:super_editor/src/infrastructure/super_textfield/input_method_engine/_ime_text_editing_controller.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/ios/_editing_controls.dart';
+import 'package:super_selectable_text/super_selectable_text.dart';
 
-import '../../attributed_text.dart';
-import '../../super_selectable_text.dart';
-import '../super_textfield.dart' hide SuperTextFieldScrollview, SuperTextFieldScrollviewState;
+import '../../platforms/ios/toolbar.dart';
 import '_caret.dart';
 import '_floating_cursor.dart';
-import '_toolbar.dart';
 import '_user_interaction.dart';
 
+export '../../platforms/ios/selection_handles.dart';
+export '../../platforms/ios/toolbar.dart';
 export '../infrastructure/magnifier.dart';
 export '_caret.dart';
-export '_handles.dart';
-export '_toolbar.dart';
 export '_user_interaction.dart';
 
 final _log = iosTextFieldLog;
@@ -30,14 +30,18 @@ class SuperIOSTextField extends StatefulWidget {
     Key? key,
     this.focusNode,
     this.textController,
-    required this.caretColor,
-    required this.selectionColor,
-    required this.handlesColor,
     this.textStyleBuilder = defaultStyleBuilder,
+    this.textAlign = TextAlign.left,
+    this.hintBehavior = HintBehavior.displayHintUntilFocus,
+    this.hintBuilder,
     this.minLines,
     this.maxLines = 1,
     this.lineHeight,
+    required this.caretColor,
+    required this.selectionColor,
+    required this.handlesColor,
     this.textInputAction = TextInputAction.done,
+    this.popoverToolbarBuilder = _defaultPopoverToolbarBuilder,
     this.showDebugPaint = false,
     this.onPerformActionPressed,
   })  : assert(minLines == null || minLines == 1 || lineHeight != null, 'minLines > 1 requires a non-null lineHeight'),
@@ -51,9 +55,20 @@ class SuperIOSTextField extends StatefulWidget {
   /// this text field.
   final ImeAttributedTextEditingController? textController;
 
+  /// The alignment to use for text in this text field.
+  final TextAlign textAlign;
+
   /// Text style factory that creates styles for the content in
   /// [textController] based on the attributions in that content.
   final AttributionStyleBuilder textStyleBuilder;
+
+  /// Policy for when the hint should be displayed.
+  final HintBehavior hintBehavior;
+
+  /// Builder that creates the hint widget, when a hint is displayed.
+  ///
+  /// To easily build a hint with styled text, see [StyledHintBuilder].
+  final WidgetBuilder? hintBuilder;
 
   /// Color of the caret.
   final Color caretColor;
@@ -93,19 +108,23 @@ class SuperIOSTextField extends StatefulWidget {
   ///  * [lineHeight]
   final int? maxLines;
 
-  /// The height of a single line of text in this text field, used
+  /// The height of a single line of text in this text scroll view, used
   /// with [minLines] and [maxLines] to size the text field.
   ///
-  /// An explicit [lineHeight] is required because rich text in this
-  /// text field might have lines of varying height, which would
-  /// result in a constantly changing text field height during scrolling.
-  /// To avoid that situation, a single, explicit [lineHeight] is
-  /// provided and used for all text field height calculations.
+  /// An explicit [lineHeight] is required for multi-line text fields
+  /// because rich text in this text scroll view might have lines of
+  /// varying height, which would result in a constantly changing text
+  /// field height during scrolling. To avoid that situation, a single,
+  /// explicit [lineHeight] is provided and used for all text field height
+  /// calculations.
   final double? lineHeight;
 
   /// The type of action associated with the action button on the mobile
   /// keyboard.
   final TextInputAction textInputAction;
+
+  /// Builder that creates the popover toolbar widget that appears when text is selected.
+  final Widget Function(BuildContext, IOSEditingOverlayController) popoverToolbarBuilder;
 
   /// Whether to paint debug guides.
   final bool showDebugPaint;
@@ -225,11 +244,21 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
   void dispose() {
     _removeEditingOverlayControls();
 
+    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      // Dispose after the current frame so that other widgets have
+      // time to remove their listeners.
+      _editingOverlayController.dispose();
+    });
+
     _textEditingController
       ..removeListener(_onTextOrSelectionChange)
       ..onIOSFloatingCursorChange = null;
     if (widget.textController == null) {
-      _textEditingController.dispose();
+      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+        // Dispose after the current frame so that other widgets have
+        // time to remove their listeners.
+        _textEditingController.dispose();
+      });
     }
 
     _focusNode.removeListener(_onFocusChange);
@@ -351,30 +380,19 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
             child: ListenableBuilder(
               listenable: _textEditingController,
               builder: (context) {
-                final textSpan = _textEditingController.text.text.isNotEmpty
-                    ? _textEditingController.text.computeTextSpan(widget.textStyleBuilder)
-                    : AttributedText(text: 'enter text').computeTextSpan(
-                        (attributions) => widget.textStyleBuilder(attributions).copyWith(color: Colors.grey));
+                final isTextEmpty = _textEditingController.text.text.isEmpty;
+                final showHint = widget.hintBuilder != null &&
+                    ((isTextEmpty && widget.hintBehavior == HintBehavior.displayHintUntilTextEntered) ||
+                        (isTextEmpty &&
+                            !_focusNode.hasFocus &&
+                            widget.hintBehavior == HintBehavior.displayHintUntilFocus));
 
                 return CompositedTransformTarget(
                   link: _textContentLayerLink,
                   child: Stack(
                     children: [
-                      // TODO: switch out textSelectionDecoration and textCaretFactory
-                      //       for backgroundBuilders and foregroundBuilders, respectively
-                      //
-                      //       add the floating cursor as a foreground builder
-                      SuperSelectableText(
-                        key: _textContentKey,
-                        textSpan: textSpan,
-                        textSelection: _textEditingController.selection,
-                        textSelectionDecoration: TextSelectionDecoration(selectionColor: widget.selectionColor),
-                        showCaret: true,
-                        textCaretFactory: IOSTextFieldCaretFactory(
-                          color: _floatingCursorController.isShowingFloatingCursor ? Colors.grey : widget.caretColor,
-                          width: 2,
-                        ),
-                      ),
+                      if (showHint) widget.hintBuilder!(context),
+                      _buildSelectableText(),
                       Positioned(
                         left: 0,
                         top: 0,
@@ -394,10 +412,33 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
       ),
     );
   }
+
+  Widget _buildSelectableText() {
+    final textSpan = _textEditingController.text.text.isNotEmpty
+        ? _textEditingController.text.computeTextSpan(widget.textStyleBuilder)
+        : AttributedText(text: "").computeTextSpan(widget.textStyleBuilder);
+
+    // TODO: switch out textSelectionDecoration and textCaretFactory
+    //       for backgroundBuilders and foregroundBuilders, respectively
+    //
+    //       add the floating cursor as a foreground builder
+    return SuperSelectableText(
+      key: _textContentKey,
+      textSpan: textSpan,
+      textAlign: widget.textAlign,
+      textSelection: _textEditingController.selection,
+      textSelectionDecoration: TextSelectionDecoration(selectionColor: widget.selectionColor),
+      showCaret: true,
+      textCaretFactory: IOSTextFieldCaretFactory(
+        color: _floatingCursorController.isShowingFloatingCursor ? Colors.grey : widget.caretColor,
+        width: 2,
+      ),
+    );
+  }
 }
 
 Widget _defaultPopoverToolbarBuilder(BuildContext context, IOSEditingOverlayController controller) {
-  return IOSTextfieldToolbar(
+  return IOSTextEditingFloatingToolbar(
     onCutPressed: () {
       final textController = controller.textController;
       final selection = textController.selection;

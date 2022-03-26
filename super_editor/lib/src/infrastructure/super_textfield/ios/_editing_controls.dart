@@ -3,13 +3,10 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
-import 'package:super_editor/src/infrastructure/super_selectable_text.dart';
-import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/text_scrollview.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/toolbar_position_delegate.dart';
-import 'package:super_editor/src/infrastructure/super_textfield/ios/_magnifier.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/magnifier.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/super_textfield.dart';
-
-import '_handles.dart';
+import 'package:super_selectable_text/super_selectable_text.dart';
 
 final _log = iosTextFieldLog;
 
@@ -120,7 +117,7 @@ class _IOSEditingControlsState extends State<IOSEditingControls> with WidgetsBin
 
   @override
   void dispose() {
-    widget.editingController.textController.addListener(_rebuildOnNextFrame);
+    widget.editingController.textController.removeListener(_rebuildOnNextFrame);
 
     WidgetsBinding.instance!.removeObserver(this);
 
@@ -488,11 +485,11 @@ class _IOSEditingControlsState extends State<IOSEditingControls> with WidgetsBin
             color: widget.showDebugPaint ? Colors.green : Colors.transparent,
             child: showHandle
                 ? isUpstreamHandle
-                    ? IOSTextFieldHandle.upstream(
+                    ? IOSSelectionHandle.upstream(
                         color: widget.handleColor,
                         caretHeight: lineHeight,
                       )
-                    : IOSTextFieldHandle.downstream(
+                    : IOSSelectionHandle.downstream(
                         color: widget.handleColor,
                         caretHeight: lineHeight,
                       )

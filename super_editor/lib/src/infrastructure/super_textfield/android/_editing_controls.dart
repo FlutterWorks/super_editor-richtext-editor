@@ -4,12 +4,13 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
-import 'package:super_editor/src/infrastructure/super_selectable_text.dart';
-import 'package:super_editor/src/infrastructure/super_textfield/android/_magnifier.dart';
+import 'package:super_editor/src/infrastructure/platforms/android/magnifier.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/android/android_textfield.dart';
+import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/attributed_text_editing_controller.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/text_scrollview.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/toolbar_position_delegate.dart';
-import 'package:super_editor/src/infrastructure/super_textfield/super_textfield.dart';
+import 'package:super_editor/src/infrastructure/touch_controls.dart';
+import 'package:super_selectable_text/super_selectable_text.dart';
 
 final _log = androidTextFieldLog;
 
@@ -128,7 +129,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
 
   @override
   void dispose() {
-    widget.editingController.textController.addListener(_rebuildOnNextFrame);
+    widget.editingController.textController.removeListener(_rebuildOnNextFrame);
 
     WidgetsBinding.instance!.removeObserver(this);
 
@@ -514,7 +515,10 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     _log.finer('Collapsed handle text position: $extentTextPosition');
     final extentHandleOffsetInText = _textPositionToTextOffset(extentTextPosition);
     _log.finer('Collapsed handle text offset: $extentHandleOffsetInText');
-    final extentLineHeight = widget.textContentKey.currentState!.getCharacterBox(extentTextPosition).toRect().height;
+    double extentLineHeight = widget.textContentKey.currentState!.getCharacterBox(extentTextPosition).toRect().height;
+    if (widget.editingController.textController.text.text.isEmpty) {
+      extentLineHeight = widget.textContentKey.currentState!.getLineHeightAtPosition(extentTextPosition);
+    }
 
     if (extentHandleOffsetInText == const Offset(0, 0) && extentTextPosition.offset != 0) {
       // The caret offset is (0, 0), but the caret text position isn't at the
@@ -535,7 +539,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     return _buildHandle(
       handleKey: _collapsedHandleKey,
       followerOffset: extentHandleOffsetInText + Offset(0, extentLineHeight),
-      handleType: AndroidHandleType.collapsed,
+      handleType: HandleType.collapsed,
       showHandle: true,
       debugColor: Colors.blue,
       onPanStart: _onCollapsedPanStart,
@@ -583,7 +587,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
         handleKey: _upstreamHandleKey,
         followerOffset: upstreamHandleOffsetInText,
         showHandle: showUpstreamHandle,
-        handleType: AndroidHandleType.upstream,
+        handleType: HandleType.upstream,
         debugColor: Colors.green,
         onPanStart: selectionDirection == TextAffinity.downstream ? _onBasePanStart : _onExtentPanStart,
       ),
@@ -592,7 +596,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
         handleKey: _downstreamHandleKey,
         followerOffset: downstreamHandleOffsetInText,
         showHandle: showDownstreamHandle,
-        handleType: AndroidHandleType.downstream,
+        handleType: HandleType.downstream,
         debugColor: Colors.red,
         onPanStart: selectionDirection == TextAffinity.downstream ? _onExtentPanStart : _onBasePanStart,
       ),
@@ -603,19 +607,19 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     required Key handleKey,
     required Offset followerOffset,
     required bool showHandle,
-    required AndroidHandleType handleType,
+    required HandleType handleType,
     required Color debugColor,
     required void Function(DragStartDetails) onPanStart,
   }) {
     late Offset fractionalTranslation;
     switch (handleType) {
-      case AndroidHandleType.collapsed:
+      case HandleType.collapsed:
         fractionalTranslation = const Offset(-0.5, 0.0);
         break;
-      case AndroidHandleType.upstream:
+      case HandleType.upstream:
         fractionalTranslation = const Offset(-1.0, 0.0);
         break;
-      case AndroidHandleType.downstream:
+      case HandleType.downstream:
         fractionalTranslation = Offset.zero;
         break;
     }
@@ -636,12 +640,11 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
             color: widget.showDebugPaint ? Colors.green : Colors.transparent,
             child: showHandle
                 ? AnimatedOpacity(
-                    opacity: handleType == AndroidHandleType.collapsed &&
-                            widget.editingController.isCollapsedHandleAutoHidden
+                    opacity: handleType == HandleType.collapsed && widget.editingController.isCollapsedHandleAutoHidden
                         ? 0.0
                         : 1.0,
                     duration: const Duration(milliseconds: 150),
-                    child: AndroidTextFieldHandle(
+                    child: AndroidSelectionHandle(
                       handleType: handleType,
                       color: widget.handleColor,
                     ),
@@ -712,6 +715,12 @@ class AndroidEditingOverlayController with ChangeNotifier {
     required this.textController,
     required LayerLink magnifierFocalPoint,
   }) : _magnifierFocalPoint = magnifierFocalPoint;
+
+  @override
+  void dispose() {
+    _handleAutoHideTimer?.cancel();
+    super.dispose();
+  }
 
   bool _isToolbarVisible = false;
   bool get isToolbarVisible => _isToolbarVisible;

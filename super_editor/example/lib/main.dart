@@ -1,26 +1,48 @@
+import 'package:example/demos/components/demo_text_with_hint.dart';
+import 'package:example/demos/components/demo_unselectable_hr.dart';
+import 'package:example/demos/demo_app_shortcuts.dart';
 import 'package:example/demos/demo_rtl.dart';
 import 'package:example/demos/demo_markdown_serialization.dart';
 import 'package:example/demos/demo_paragraphs.dart';
 import 'package:example/demos/demo_selectable_text.dart';
+import 'package:example/demos/editor_configs/demo_mobile_editing_android.dart';
+import 'package:example/demos/editor_configs/demo_mobile_editing_ios.dart';
 import 'package:example/demos/example_editor/example_editor.dart';
+import 'package:example/demos/flutter_features/demo_inline_widgets.dart';
 import 'package:example/demos/flutter_features/textinputclient/basic_text_input_client.dart';
+import 'package:example/demos/scrolling/demo_task_and_chat_with_customscrollview.dart';
+import 'package:example/demos/styles/demo_doc_styles.dart';
 import 'package:example/demos/supertextfield/ios/demo_superiostextfield.dart';
 import 'package:example/demos/flutter_features/textinputclient/textfield.dart';
 import 'package:example/demos/sliver_example_editor.dart';
 import 'package:example/demos/supertextfield/demo_textfield.dart';
+import 'package:example/logging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:logging/logging.dart';
+import 'package:super_editor/super_editor.dart';
 
 import 'demos/demo_attributed_text.dart';
 import 'demos/demo_document_loses_focus.dart';
 import 'demos/demo_switch_document_content.dart';
+import 'demos/scrolling/demo_task_and_chat_with_renderobject.dart';
 import 'demos/super_document/demo_read_only_scrolling_document.dart';
 import 'demos/supertextfield/android/demo_superandroidtextfield.dart';
 
 /// Demo of a basic text editor, as well as various widgets that
 /// are available in this package.
 Future<void> main() async {
+  initLoggers(Level.FINE, {
+    editorGesturesLog,
+    editorImeLog,
+    editorKeyLog,
+    editorOpsLog,
+    editorLayoutLog,
+    editorDocLog,
+    appLog,
+  });
+
   runApp(SuperEditorDemoApp());
 }
 
@@ -176,6 +198,13 @@ final _menu = <_MenuGroup>[
         },
       ),
       _MenuItem(
+        icon: Icons.shortcut,
+        title: 'App Shortcuts',
+        pageBuilder: (context) {
+          return AppShortcutsDemo();
+        },
+      ),
+      _MenuItem(
         icon: Icons.description,
         title: 'Markdown Serialization Demo',
         pageBuilder: (context) {
@@ -187,6 +216,37 @@ final _menu = <_MenuGroup>[
         title: 'RTL Demo',
         pageBuilder: (context) {
           return RTLDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
+    title: 'STYLES',
+    items: [
+      _MenuItem(
+        icon: Icons.style,
+        title: 'Document Styles',
+        pageBuilder: (context) {
+          return const DocumentStylesDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
+    title: 'EDITOR CONFIGS',
+    items: [
+      _MenuItem(
+        icon: Icons.phone_android,
+        title: 'Mobile Editing - Android',
+        pageBuilder: (context) {
+          return MobileEditingAndroidDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.phone_android,
+        title: 'Mobile Editing - iOS',
+        pageBuilder: (context) {
+          return MobileEditingIOSDemo();
         },
       ),
     ],
@@ -204,6 +264,25 @@ final _menu = <_MenuGroup>[
     ],
   ),
   _MenuGroup(
+    title: 'SCROLLING',
+    items: [
+      _MenuItem(
+        icon: Icons.task,
+        title: 'Task and Chat Demo - RenderBox',
+        pageBuilder: (context) {
+          return TaskAndChatWithRenderObjectDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.task,
+        title: 'Task and Chat Demo - Slivers',
+        pageBuilder: (context) {
+          return TaskAndChatWithCustomScrollViewDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
     title: 'PIECES',
     items: [
       _MenuItem(
@@ -211,6 +290,25 @@ final _menu = <_MenuGroup>[
         title: 'Paragraphs',
         pageBuilder: (context) {
           return ParagraphsDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
+    title: 'DOC COMPONENTS',
+    items: [
+      _MenuItem(
+        icon: Icons.short_text,
+        title: 'Text with hint',
+        pageBuilder: (context) {
+          return TextWithHintDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.short_text,
+        title: 'Unselectable HR',
+        pageBuilder: (context) {
+          return UnselectableHrDemo();
         },
       ),
     ],
@@ -275,6 +373,13 @@ final _menu = <_MenuGroup>[
         title: 'Basic TextInputClient',
         pageBuilder: (context) {
           return BasicTextInputClientDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.image,
+        title: 'Text Inline Widgets',
+        pageBuilder: (context) {
+          return TextInlineWidgetDemo();
         },
       ),
     ],

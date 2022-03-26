@@ -1,18 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:super_editor/src/core/document.dart';
-import 'package:super_editor/src/core/document_composer.dart';
-import 'package:super_editor/src/core/document_editor.dart';
-import 'package:super_editor/src/core/document_selection.dart';
-import 'package:super_editor/src/core/edit_context.dart';
-import 'package:super_editor/src/default_editor/attributions.dart';
-import 'package:super_editor/src/default_editor/box_component.dart';
-import 'package:super_editor/src/default_editor/common_editor_operations.dart';
-import 'package:super_editor/src/default_editor/document_interaction.dart';
-import 'package:super_editor/src/default_editor/horizontal_rule.dart';
-import 'package:super_editor/src/default_editor/paragraph.dart';
-import 'package:super_editor/src/default_editor/text.dart';
-import 'package:super_editor/src/infrastructure/attributed_text.dart';
+import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
+import 'package:super_editor/super_editor.dart';
 
 import '../_document_test_tools.dart';
 import '../_text_entry_test_tools.dart';
@@ -32,12 +21,12 @@ void main() {
         final editor = DocumentEditor(document: document);
 
         final command = ToggleTextAttributionsCommand(
-          documentSelection: DocumentSelection(
-            base: const DocumentPosition(
+          documentSelection: const DocumentSelection(
+            base: DocumentPosition(
               nodeId: 'paragraph',
               nodePosition: TextNodePosition(offset: 1),
             ),
-            extent: const DocumentPosition(
+            extent: DocumentPosition(
               nodeId: 'paragraph',
               // IMPORTANT: we want to end the bold at the 'd' character but
               // the TextPosition indexes the ' ' after the 'd'. This is because
@@ -127,12 +116,12 @@ void main() {
             );
 
         // Select multiple characters in the paragraph
-        editContext.composer.selection = DocumentSelection(
-          base: const DocumentPosition(
+        editContext.composer.selection = const DocumentSelection(
+          base: DocumentPosition(
             nodeId: 'paragraph',
             nodePosition: TextNodePosition(offset: 0),
           ),
-          extent: const DocumentPosition(
+          extent: DocumentPosition(
             nodeId: 'paragraph',
             nodePosition: TextNodePosition(offset: 1),
           ),
@@ -165,7 +154,7 @@ void main() {
         editContext.composer.selection = const DocumentSelection.collapsed(
           position: DocumentPosition(
             nodeId: 'horizontal_rule',
-            nodePosition: BinaryNodePosition.notIncluded(),
+            nodePosition: UpstreamDownstreamNodePosition.downstream(),
           ),
         );
 

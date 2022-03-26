@@ -1,77 +1,127 @@
-import 'package:flutter/foundation.dart';
+import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
-import 'package:super_editor/super_editor.dart';
+import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
 
 import '../core/document.dart';
 import 'box_component.dart';
-import 'styles.dart';
+import 'layout_single_column/layout_single_column.dart';
 
 /// [DocumentNode] for a horizontal rule, which represents a full-width
 /// horizontal separation in a document.
-class HorizontalRuleNode with ChangeNotifier implements DocumentNode {
+class HorizontalRuleNode extends BlockNode with ChangeNotifier {
   HorizontalRuleNode({
     required this.id,
-  });
+  }) {
+    putMetadataValue("blockType", const NamedAttribution("horizontalRule"));
+  }
 
   @override
   final String id;
 
   @override
-  BinaryNodePosition get beginningPosition => const BinaryNodePosition.included();
-
-  @override
-  BinaryNodePosition get endPosition => const BinaryNodePosition.included();
-
-  @override
-  NodePosition selectUpstreamPosition(NodePosition position1, NodePosition position2) {
-    if (position1 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position1 but received a ${position1.runtimeType}');
-    }
-    if (position2 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position2 but received a ${position2.runtimeType}');
-    }
-
-    // BinaryNodePosition's don't disambiguate between upstream and downstream so
-    // it doesn't matter which one we return.
-    return position1;
-  }
-
-  @override
-  NodePosition selectDownstreamPosition(NodePosition position1, NodePosition position2) {
-    if (position1 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position1 but received a ${position1.runtimeType}');
-    }
-    if (position2 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position2 but received a ${position2.runtimeType}');
-    }
-
-    // BinaryNodePosition's don't disambiguate between upstream and downstream so
-    // it doesn't matter which one we return.
-    return position1;
-  }
-
-  @override
-  BinarySelection computeSelection({
-    @required dynamic base,
-    @required dynamic extent,
-  }) {
-    return const BinarySelection.all();
-  }
-
-  @override
   String? copyContent(dynamic selection) {
-    if (selection is! BinarySelection) {
-      throw Exception('HorizontalRuleNode can only copy content from a BinarySelection.');
+    if (selection is! UpstreamDownstreamNodeSelection) {
+      throw Exception('HorizontalRuleNode can only copy content from a UpstreamDownstreamNodeSelection.');
     }
 
-    return selection.position == const BinaryNodePosition.included() ? '---' : null;
+    return !selection.isCollapsed ? '---' : null;
   }
 
   @override
   bool hasEquivalentContent(DocumentNode other) {
     return other is HorizontalRuleNode;
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is HorizontalRuleNode && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+class HorizontalRuleComponentBuilder implements ComponentBuilder {
+  const HorizontalRuleComponentBuilder();
+
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(Document document, DocumentNode node) {
+    if (node is! HorizontalRuleNode) {
+      return null;
+    }
+
+    return HorizontalRuleComponentViewModel(
+      nodeId: node.id,
+      selectionColor: const Color(0x00000000),
+      caretColor: const Color(0x00000000),
+    );
+  }
+
+  @override
+  Widget? createComponent(
+      SingleColumnDocumentComponentContext componentContext, SingleColumnLayoutComponentViewModel componentViewModel) {
+    if (componentViewModel is! HorizontalRuleComponentViewModel) {
+      return null;
+    }
+
+    return HorizontalRuleComponent(
+      componentKey: componentContext.componentKey,
+      selection: componentViewModel.selection,
+      selectionColor: componentViewModel.selectionColor,
+      showCaret: componentViewModel.caret != null,
+      caretColor: componentViewModel.caretColor,
+    );
+  }
+}
+
+class HorizontalRuleComponentViewModel extends SingleColumnLayoutComponentViewModel {
+  HorizontalRuleComponentViewModel({
+    required String nodeId,
+    double? maxWidth,
+    EdgeInsetsGeometry padding = EdgeInsets.zero,
+    this.selection,
+    required this.selectionColor,
+    this.caret,
+    required this.caretColor,
+  }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
+
+  UpstreamDownstreamNodeSelection? selection;
+  Color selectionColor;
+  UpstreamDownstreamNodePosition? caret;
+  Color caretColor;
+
+  @override
+  HorizontalRuleComponentViewModel copy() {
+    return HorizontalRuleComponentViewModel(
+      nodeId: nodeId,
+      maxWidth: maxWidth,
+      padding: padding,
+      selection: selection,
+      selectionColor: selectionColor,
+      caret: caret,
+      caretColor: caretColor,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      super == other &&
+          other is HorizontalRuleComponentViewModel &&
+          runtimeType == other.runtimeType &&
+          nodeId == other.nodeId &&
+          selection == other.selection &&
+          selectionColor == other.selectionColor &&
+          caret == other.caret &&
+          caretColor == other.caretColor;
+
+  @override
+  int get hashCode =>
+      super.hashCode ^
+      nodeId.hashCode ^
+      selection.hashCode ^
+      selectionColor.hashCode ^
+      caret.hashCode ^
+      caretColor.hashCode;
 }
 
 /// Displays a horizontal rule in a document.
@@ -82,26 +132,28 @@ class HorizontalRuleComponent extends StatelessWidget {
     this.color = Colors.grey,
     this.thickness = 1,
     this.selectionColor = Colors.blue,
-    this.isSelected = false,
+    this.selection,
+    required this.caretColor,
+    this.showCaret = false,
   }) : super(key: key);
 
   final GlobalKey componentKey;
   final Color color;
   final double thickness;
   final Color selectionColor;
-  final bool isSelected;
+  final UpstreamDownstreamNodeSelection? selection;
+  final Color caretColor;
+  final bool showCaret;
 
   @override
   Widget build(BuildContext context) {
-    return BoxComponent(
-      key: componentKey,
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border.all(
-            width: 1,
-            color: isSelected ? selectionColor : Colors.transparent,
-          ),
-        ),
+    return SelectableBox(
+      selection: selection,
+      selectionColor: selectionColor,
+      caretColor: caretColor,
+      showCaret: showCaret,
+      child: BoxComponent(
+        key: componentKey,
         child: Divider(
           color: color,
           thickness: thickness,
@@ -109,23 +161,4 @@ class HorizontalRuleComponent extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Component builder that returns a [HorizontalRuleComponent] when
-/// [componentContext.documentNode] is a [HorizontalRuleNode].
-Widget? horizontalRuleBuilder(ComponentContext componentContext) {
-  if (componentContext.documentNode is! HorizontalRuleNode) {
-    return null;
-  }
-
-  final selection =
-      componentContext.nodeSelection == null ? null : componentContext.nodeSelection!.nodeSelection as BinarySelection;
-  final isSelected = selection != null && selection.position.isIncluded;
-
-  return HorizontalRuleComponent(
-    componentKey: componentContext.componentKey,
-    isSelected: isSelected,
-    selectionColor: (componentContext.extensions[selectionStylesExtensionKey] as SelectionStyle?)?.selectionColor ??
-        const Color(0x00000000),
-  );
 }

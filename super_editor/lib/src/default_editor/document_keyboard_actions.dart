@@ -1,17 +1,14 @@
-import 'dart:math';
-
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:super_editor/src/core/document.dart';
+import 'package:super_editor/src/core/document_layout.dart';
+import 'package:super_editor/src/core/document_selection.dart';
 import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/default_editor/attributions.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/keyboard.dart';
-import 'package:super_editor/super_editor.dart';
 
-import 'document_interaction.dart';
-import 'multi_node_editing.dart';
+import 'document_input_keyboard.dart';
 import 'paragraph.dart';
 import 'text.dart';
 
@@ -33,7 +30,7 @@ ExecutionInstruction pasteWhenCmdVIsPressed({
   required EditContext editContext,
   required RawKeyEvent keyEvent,
 }) {
-  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.character?.toLowerCase() != 'v') {
+  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.keyV) {
     return ExecutionInstruction.continueExecution;
   }
   if (editContext.composer.selection == null) {
@@ -41,31 +38,7 @@ ExecutionInstruction pasteWhenCmdVIsPressed({
   }
 
   _log.log('pasteWhenCmdVIsPressed', 'Pasting clipboard content...');
-  DocumentPosition pastePosition = editContext.composer.selection!.extent;
-
-  // Delete all currently selected content.
-  if (!editContext.composer.selection!.isCollapsed) {
-    pastePosition = _getDocumentPositionAfterDeletion(
-      document: editContext.editor.document,
-      selection: editContext.composer.selection!,
-    );
-
-    // Delete the selected content.
-    editContext.editor.executeCommand(
-      DeleteSelectionCommand(documentSelection: editContext.composer.selection!),
-    );
-
-    editContext.composer.selection = DocumentSelection.collapsed(position: pastePosition);
-  }
-
-  // TODO: figure out a general approach for asynchronous behaviors that
-  //       need to be carried out in response to user input.
-  _paste(
-    document: editContext.editor.document,
-    editor: editContext.editor,
-    composer: editContext.composer,
-    pastePosition: pastePosition,
-  );
+  editContext.commonOps.paste();
 
   return ExecutionInstruction.haltExecution;
 }
@@ -74,7 +47,7 @@ ExecutionInstruction selectAllWhenCmdAIsPressed({
   required EditContext editContext,
   required RawKeyEvent keyEvent,
 }) {
-  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.character?.toLowerCase() != 'a') {
+  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.keyA) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -82,144 +55,11 @@ ExecutionInstruction selectAllWhenCmdAIsPressed({
   return didSelectAll ? ExecutionInstruction.haltExecution : ExecutionInstruction.continueExecution;
 }
 
-Future<void> _paste({
-  required Document document,
-  required DocumentEditor editor,
-  required DocumentComposer composer,
-  required DocumentPosition pastePosition,
-}) async {
-  final content = (await Clipboard.getData('text/plain'))?.text ?? '';
-  _log.log('_paste', 'Content from clipboard: $content');
-
-  editor.executeCommand(
-    _PasteEditorCommand(
-      content: content,
-      pastePosition: pastePosition,
-      composer: composer,
-    ),
-  );
-}
-
-class _PasteEditorCommand implements EditorCommand {
-  _PasteEditorCommand({
-    required String content,
-    required DocumentPosition pastePosition,
-    required DocumentComposer composer,
-  })  : _content = content,
-        _pastePosition = pastePosition,
-        _composer = composer;
-
-  final String _content;
-  final DocumentPosition _pastePosition;
-  final DocumentComposer _composer;
-
-  @override
-  void execute(Document document, DocumentEditorTransaction transaction) {
-    final splitContent = _content.split('\n\n');
-    _log.log('_PasteEditorCommand', 'Split content:');
-    for (final piece in splitContent) {
-      _log.log('_PasteEditorCommand', ' - "$piece"');
-    }
-
-    final currentNodeWithSelection = document.getNodeById(_pastePosition.nodeId);
-
-    DocumentPosition? newSelectionPosition;
-
-    if (currentNodeWithSelection is TextNode) {
-      final textNode = document.getNode(_pastePosition) as TextNode;
-      final pasteTextOffset = (_pastePosition.nodePosition as TextPosition).offset;
-      final attributionsAtPasteOffset = textNode.text.getAllAttributionsAt(pasteTextOffset);
-
-      if (splitContent.length > 1 && pasteTextOffset < textNode.endPosition.offset) {
-        // There is more than 1 node of content being pasted. Therefore,
-        // new nodes will need to be added, which means that the currently
-        // selected text node will be split at the current text offset.
-        // Configure a new node to be added at the end of the pasted content
-        // which contains the trailing text from the currently selected
-        // node.
-        if (currentNodeWithSelection is ParagraphNode) {
-          SplitParagraphCommand(
-            nodeId: currentNodeWithSelection.id,
-            splitPosition: TextPosition(offset: pasteTextOffset),
-            newNodeId: DocumentEditor.createNodeId(),
-            replicateExistingMetdata: false,
-          ).execute(document, transaction);
-        } else {
-          throw Exception('Can\'t handle pasting text within node of type: $currentNodeWithSelection');
-        }
-      }
-
-      // Paste the first piece of content into the selected TextNode.
-      InsertTextCommand(
-        documentPosition: _pastePosition,
-        textToInsert: splitContent.first,
-        attributions: attributionsAtPasteOffset,
-      ).execute(document, transaction);
-
-      // At this point in the paste process, the document selection
-      // position is at the end of the text that was just pasted.
-      newSelectionPosition = DocumentPosition(
-        nodeId: currentNodeWithSelection.id,
-        nodePosition: TextNodePosition(
-          offset: pasteTextOffset + splitContent.first.length,
-        ),
-      );
-
-      // Remove the pasted text from the list of pieces of text
-      // to paste.
-      splitContent.removeAt(0);
-    }
-
-    final newNodes = splitContent
-        .map(
-          // TODO: create nodes based on content inspection.
-          (nodeText) => ParagraphNode(
-            id: DocumentEditor.createNodeId(),
-            text: AttributedText(
-              text: nodeText,
-            ),
-          ),
-        )
-        .toList();
-    _log.log('_PasteEditorCommand', ' - new nodes: $newNodes');
-
-    int newNodeToMergeIndex = 0;
-    DocumentNode mergeAfterNode;
-
-    final nodeWithSelection = document.getNodeById(_pastePosition.nodeId);
-    if (nodeWithSelection == null) {
-      throw Exception(
-          'Failed to complete paste process because the node being pasted into disappeared from the document unexpectedly.');
-    }
-    mergeAfterNode = nodeWithSelection;
-
-    for (int i = newNodeToMergeIndex; i < newNodes.length; ++i) {
-      transaction.insertNodeAfter(
-        previousNode: mergeAfterNode,
-        newNode: newNodes[i],
-      );
-      mergeAfterNode = newNodes[i];
-
-      newSelectionPosition = DocumentPosition(
-        nodeId: mergeAfterNode.id,
-        nodePosition: mergeAfterNode.endPosition,
-      );
-    }
-
-    _composer.selection = DocumentSelection.collapsed(
-      position: newSelectionPosition!,
-    );
-    _log.log('_PasteEditorCommand', ' - new selection: ${_composer.selection}');
-
-    _log.log('_PasteEditorCommand', 'Done with paste command.');
-  }
-}
-
 ExecutionInstruction copyWhenCmdCIsPressed({
   required EditContext editContext,
   required RawKeyEvent keyEvent,
 }) {
-  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.character?.toLowerCase() != 'c') {
+  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.keyC) {
     return ExecutionInstruction.continueExecution;
   }
   if (editContext.composer.selection == null) {
@@ -230,13 +70,7 @@ ExecutionInstruction copyWhenCmdCIsPressed({
     return ExecutionInstruction.haltExecution;
   }
 
-  final textToCopy = _textInSelection(
-    document: editContext.editor.document,
-    documentSelection: editContext.composer.selection!,
-  );
-  // TODO: figure out a general approach for asynchronous behaviors that
-  //       need to be carried out in response to user input.
-  _saveToClipboard(textToCopy);
+  editContext.commonOps.copy();
 
   return ExecutionInstruction.haltExecution;
 }
@@ -245,7 +79,7 @@ ExecutionInstruction cutWhenCmdXIsPressed({
   required EditContext editContext,
   required RawKeyEvent keyEvent,
 }) {
-  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.character?.toLowerCase() != 'x') {
+  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.keyX) {
     return ExecutionInstruction.continueExecution;
   }
   if (editContext.composer.selection == null) {
@@ -256,83 +90,16 @@ ExecutionInstruction cutWhenCmdXIsPressed({
     return ExecutionInstruction.haltExecution;
   }
 
-  final textToCut = _textInSelection(
-    document: editContext.editor.document,
-    documentSelection: editContext.composer.selection!,
-  );
-  // TODO: figure out a general approach for asynchronous behaviors that
-  //       need to be carried out in response to user input.
-  _saveToClipboard(textToCut);
+  editContext.commonOps.cut();
 
-  editContext.commonOps.deleteSelection();
   return ExecutionInstruction.haltExecution;
-}
-
-Future<void> _saveToClipboard(String text) {
-  return Clipboard.setData(ClipboardData(text: text));
-}
-
-String _textInSelection({
-  required Document document,
-  required DocumentSelection documentSelection,
-}) {
-  final selectedNodes = document.getNodesInside(
-    documentSelection.base,
-    documentSelection.extent,
-  );
-
-  final buffer = StringBuffer();
-  for (int i = 0; i < selectedNodes.length; ++i) {
-    final selectedNode = selectedNodes[i];
-    dynamic nodeSelection;
-
-    if (i == 0) {
-      // This is the first node and it may be partially selected.
-      final baseSelectionPosition = selectedNode.id == documentSelection.base.nodeId
-          ? documentSelection.base.nodePosition
-          : documentSelection.extent.nodePosition;
-
-      final extentSelectionPosition =
-          selectedNodes.length > 1 ? selectedNode.endPosition : documentSelection.extent.nodePosition;
-
-      nodeSelection = selectedNode.computeSelection(
-        base: baseSelectionPosition,
-        extent: extentSelectionPosition,
-      );
-    } else if (i == selectedNodes.length - 1) {
-      // This is the last node and it may be partially selected.
-      final nodePosition = selectedNode.id == documentSelection.base.nodeId
-          ? documentSelection.base.nodePosition
-          : documentSelection.extent.nodePosition;
-
-      nodeSelection = selectedNode.computeSelection(
-        base: selectedNode.beginningPosition,
-        extent: nodePosition,
-      );
-    } else {
-      // This node is fully selected. Copy the whole thing.
-      nodeSelection = selectedNode.computeSelection(
-        base: selectedNode.beginningPosition,
-        extent: selectedNode.endPosition,
-      );
-    }
-
-    final nodeContent = selectedNode.copyContent(nodeSelection);
-    if (nodeContent != null) {
-      buffer.write(nodeContent);
-      if (i < selectedNodes.length - 1) {
-        buffer.writeln();
-      }
-    }
-  }
-  return buffer.toString();
 }
 
 ExecutionInstruction cmdBToToggleBold({
   required EditContext editContext,
   required RawKeyEvent keyEvent,
 }) {
-  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.character?.toLowerCase() != 'b') {
+  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.keyB) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -349,7 +116,7 @@ ExecutionInstruction cmdIToToggleItalics({
   required EditContext editContext,
   required RawKeyEvent keyEvent,
 }) {
-  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.character?.toLowerCase() != 'i') {
+  if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.keyI) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -371,93 +138,52 @@ ExecutionInstruction anyCharacterOrDestructiveKeyToDeleteSelection({
     return ExecutionInstruction.continueExecution;
   }
 
+  // Do nothing if CMD or CTRL are pressed because this signifies an attempted
+  // shortcut.
+  if (keyEvent.isControlPressed || keyEvent.isMetaPressed) {
+    return ExecutionInstruction.continueExecution;
+  }
+
   // Specifically exclude situations where shift is pressed because shift
   // needs to alter the selection, not delete content. We have to explicitly
   // look for this because when shift is pressed along with an arrow key,
   // Flutter reports a non-null character.
-  final isShiftPressed = keyEvent.isShiftPressed;
+  if (keyEvent.isShiftPressed) {
+    return ExecutionInstruction.continueExecution;
+  }
 
   final isDestructiveKey =
       keyEvent.logicalKey == LogicalKeyboardKey.backspace || keyEvent.logicalKey == LogicalKeyboardKey.delete;
+  final isCharacterKey =
+      keyEvent.character != null && keyEvent.character != '' && !webBugBlacklistCharacters.contains(keyEvent.character);
 
-  final shouldDeleteSelection = !isShiftPressed &&
-      (isDestructiveKey ||
-          (keyEvent.character != null &&
-              keyEvent.character != '' &&
-              !webBugBlacklistCharacters.contains(keyEvent.character)));
+  final shouldDeleteSelection = isDestructiveKey || isCharacterKey;
   if (!shouldDeleteSelection) {
     return ExecutionInstruction.continueExecution;
   }
 
   editContext.commonOps.deleteSelection();
+
+  // If the user pressed a character, insert it.
+  String? character = keyEvent.character;
+  // On web, keys like shift and alt are sending their full name
+  // as a character, e.g., "Shift" and "Alt". This check prevents
+  // those keys from inserting their name into content.
+  //
+  // This filter is a blacklist, and therefore it will fail to
+  // catch any key that isn't explicitly listed. The eventual solution
+  // to this is for the web to honor the standard key event contract,
+  // but that's out of our control.
+  if (character != null && (!kIsWeb || webBugBlacklistCharacters.contains(character))) {
+    // The web reports a tab as "Tab". Intercept it and translate it to a space.
+    if (character == 'Tab') {
+      character = ' ';
+    }
+
+    editContext.commonOps.insertCharacter(character);
+  }
+
   return ExecutionInstruction.haltExecution;
-}
-
-DocumentPosition _getDocumentPositionAfterDeletion({
-  required Document document,
-  required DocumentSelection selection,
-}) {
-  // Figure out where the caret should appear after the
-  // deletion.
-  // TODO: This calculation depends upon the first
-  //       selected node still existing after the deletion. This
-  //       is a fragile expectation and should be revisited.
-  final basePosition = selection.base;
-  final baseNode = document.getNode(basePosition);
-  if (baseNode == null) {
-    throw Exception('Failed to _getDocumentPositionAfterDeletion because the base node no longer exists.');
-  }
-  final baseNodeIndex = document.getNodeIndex(baseNode);
-
-  final extentPosition = selection.extent;
-  final extentNode = document.getNode(extentPosition);
-  if (extentNode == null) {
-    throw Exception('Failed to _getDocumentPositionAfterDeletion because the extent node no longer exists.');
-  }
-  final extentNodeIndex = document.getNodeIndex(extentNode);
-  DocumentPosition newSelectionPosition;
-
-  if (baseNodeIndex != extentNodeIndex) {
-    // Place the caret at the current position within the
-    // first node in the selection.
-    newSelectionPosition = baseNodeIndex <= extentNodeIndex ? selection.base : selection.extent;
-
-    // If it's a binary selection node then that node will
-    // be replaced by a ParagraphNode with the same ID.
-    if (newSelectionPosition.nodePosition is BinaryNodePosition) {
-      // Assume that the node was replaced with an empty paragraph.
-      newSelectionPosition = DocumentPosition(
-        nodeId: newSelectionPosition.nodeId,
-        nodePosition: const TextNodePosition(offset: 0),
-      );
-    }
-  } else {
-    // Selection is within a single node. If it's a binary
-    // selection node then that node will be replaced by
-    // a ParagraphNode with the same ID. Otherwise, it must
-    // be a TextNode, in which case we need to figure out
-    // which DocumentPosition contains the earlier TextPosition.
-    if (basePosition.nodePosition is BinaryNodePosition) {
-      // Assume that the node was replace with an empty paragraph.
-      newSelectionPosition = DocumentPosition(
-        nodeId: baseNode.id,
-        nodePosition: const TextNodePosition(offset: 0),
-      );
-    } else if (basePosition.nodePosition is TextPosition) {
-      final baseOffset = (basePosition.nodePosition as TextPosition).offset;
-      final extentOffset = (extentPosition.nodePosition as TextPosition).offset;
-
-      newSelectionPosition = DocumentPosition(
-        nodeId: baseNode.id,
-        nodePosition: TextNodePosition(offset: min(baseOffset, extentOffset)),
-      );
-    } else {
-      throw Exception(
-          'Unknown selection position type: $basePosition, for node: $baseNode, within document selection: $selection');
-    }
-  }
-
-  return newSelectionPosition;
 }
 
 ExecutionInstruction backspaceToRemoveUpstreamContent({

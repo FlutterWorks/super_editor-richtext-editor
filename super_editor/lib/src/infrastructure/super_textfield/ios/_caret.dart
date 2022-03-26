@@ -1,6 +1,5 @@
 import 'package:flutter/widgets.dart';
-import 'package:super_editor/src/infrastructure/super_selectable_text.dart';
-import 'package:super_editor/src/infrastructure/text_layout.dart';
+import 'package:super_selectable_text/super_selectable_text.dart';
 
 /// [TextCaretFactory] that creates an [IOSTextFieldCaret], which
 /// paints a blinking iOS-style caret on top of a [SuperSelectableText].
@@ -82,6 +81,9 @@ class _IOSTextFieldCaretState extends State<IOSTextFieldCaret> with SingleTicker
   void initState() {
     super.initState();
     _caretBlinkController = CaretBlinkController(tickerProvider: this);
+    if (widget.selection.extent.offset >= 0) {
+      _caretBlinkController.onCaretPlaced();
+    }
   }
 
   @override
@@ -89,7 +91,11 @@ class _IOSTextFieldCaretState extends State<IOSTextFieldCaret> with SingleTicker
     super.didUpdateWidget(oldWidget);
 
     if (widget.selection != oldWidget.selection) {
-      _caretBlinkController.caretPosition = widget.selection.isCollapsed ? widget.selection.extent : null;
+      if (widget.selection.extent.offset >= 0) {
+        _caretBlinkController.onCaretMoved();
+      } else {
+        _caretBlinkController.onCaretRemoved();
+      }
     }
   }
 
@@ -160,7 +166,9 @@ class _IOSCursorPainter extends CustomPainter {
     caretPaint.color = caretColor.withOpacity(blinkController.opacity);
 
     final textPosition = selection.extent;
-    final caretHeight = textLayout.getCharacterBox(textPosition).toRect().height;
+    double caretHeight = textLayout.getCharacterBox(textPosition).toRect().height;
+    caretHeight = caretHeight > 0 ? caretHeight : textLayout.getHeightForCaret(textPosition) ?? 0;
+    caretHeight = caretHeight > 0 ? caretHeight : textLayout.getLineHeightAtPosition(textPosition);
 
     Offset caretOffset = isTextEmpty ? Offset.zero : textLayout.getOffsetAtPosition(textPosition);
 

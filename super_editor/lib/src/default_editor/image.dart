@@ -1,20 +1,24 @@
-import 'package:flutter/foundation.dart';
+import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
-import 'package:super_editor/super_editor.dart';
+import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
 
 import '../core/document.dart';
 import 'box_component.dart';
-import 'styles.dart';
+import 'layout_single_column/layout_single_column.dart';
 
 /// [DocumentNode] that represents an image at a URL.
-class ImageNode with ChangeNotifier implements DocumentNode {
+class ImageNode extends BlockNode with ChangeNotifier {
   ImageNode({
     required this.id,
     required String imageUrl,
     String altText = '',
+    Map<String, dynamic>? metadata,
   })  : _imageUrl = imageUrl,
-        _altText = altText;
+        _altText = altText {
+    this.metadata = metadata;
+
+    putMetadataValue("blockType", const NamedAttribution("image"));
+  }
 
   @override
   final String id;
@@ -38,60 +42,121 @@ class ImageNode with ChangeNotifier implements DocumentNode {
   }
 
   @override
-  BinaryNodePosition get beginningPosition => const BinaryNodePosition.included();
-
-  @override
-  BinaryNodePosition get endPosition => const BinaryNodePosition.included();
-
-  @override
-  NodePosition selectUpstreamPosition(NodePosition position1, NodePosition position2) {
-    if (position1 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position1 but received a ${position1.runtimeType}');
-    }
-    if (position2 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position2 but received a ${position2.runtimeType}');
-    }
-
-    // BinaryNodePosition's don't disambiguate between upstream and downstream so
-    // it doesn't matter which one we return.
-    return position1;
-  }
-
-  @override
-  NodePosition selectDownstreamPosition(NodePosition position1, NodePosition position2) {
-    if (position1 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position1 but received a ${position1.runtimeType}');
-    }
-    if (position2 is! BinaryNodePosition) {
-      throw Exception('Expected a BinaryNodePosition for position2 but received a ${position2.runtimeType}');
-    }
-
-    // BinaryNodePosition's don't disambiguate between upstream and downstream so
-    // it doesn't matter which one we return.
-    return position1;
-  }
-
-  @override
-  BinarySelection computeSelection({
-    @required dynamic base,
-    @required dynamic extent,
-  }) {
-    return const BinarySelection.all();
-  }
-
-  @override
   String? copyContent(dynamic selection) {
-    if (selection is! BinarySelection) {
-      throw Exception('ImageNode can only copy content from a BinarySelection.');
+    if (selection is! UpstreamDownstreamNodeSelection) {
+      throw Exception('ImageNode can only copy content from a UpstreamDownstreamNodeSelection.');
     }
 
-    return selection.position == const BinaryNodePosition.included() ? _imageUrl : null;
+    return !selection.isCollapsed ? _imageUrl : null;
   }
 
   @override
   bool hasEquivalentContent(DocumentNode other) {
     return other is ImageNode && imageUrl == other.imageUrl && altText == other.altText;
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ImageNode &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          _imageUrl == other._imageUrl &&
+          _altText == other._altText;
+
+  @override
+  int get hashCode => id.hashCode ^ _imageUrl.hashCode ^ _altText.hashCode;
+}
+
+class ImageComponentBuilder implements ComponentBuilder {
+  const ImageComponentBuilder();
+
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(Document document, DocumentNode node) {
+    if (node is! ImageNode) {
+      return null;
+    }
+
+    return ImageComponentViewModel(
+      nodeId: node.id,
+      imageUrl: node.imageUrl,
+      selectionColor: const Color(0x00000000),
+      caretColor: const Color(0x00000000),
+    );
+  }
+
+  @override
+  Widget? createComponent(
+      SingleColumnDocumentComponentContext componentContext, SingleColumnLayoutComponentViewModel componentViewModel) {
+    if (componentViewModel is! ImageComponentViewModel) {
+      return null;
+    }
+
+    return ImageComponent(
+      componentKey: componentContext.componentKey,
+      imageUrl: componentViewModel.imageUrl,
+      selection: componentViewModel.selection,
+      selectionColor: componentViewModel.selectionColor,
+      showCaret: componentViewModel.caret != null,
+      caretColor: componentViewModel.caretColor,
+    );
+  }
+}
+
+class ImageComponentViewModel extends SingleColumnLayoutComponentViewModel {
+  ImageComponentViewModel({
+    required String nodeId,
+    double? maxWidth,
+    EdgeInsetsGeometry padding = EdgeInsets.zero,
+    required this.imageUrl,
+    this.selection,
+    required this.selectionColor,
+    this.caret,
+    required this.caretColor,
+  }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
+
+  String imageUrl;
+  UpstreamDownstreamNodeSelection? selection;
+  Color selectionColor;
+  UpstreamDownstreamNodePosition? caret;
+  Color caretColor;
+
+  @override
+  ImageComponentViewModel copy() {
+    return ImageComponentViewModel(
+      nodeId: nodeId,
+      maxWidth: maxWidth,
+      padding: padding,
+      imageUrl: imageUrl,
+      selection: selection,
+      selectionColor: selectionColor,
+      caret: caret,
+      caretColor: caretColor,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      super == other &&
+          other is ImageComponentViewModel &&
+          runtimeType == other.runtimeType &&
+          nodeId == other.nodeId &&
+          imageUrl == other.imageUrl &&
+          selection == other.selection &&
+          selectionColor == other.selectionColor &&
+          caret == other.caret &&
+          caretColor == other.caretColor;
+
+  @override
+  int get hashCode =>
+      super.hashCode ^
+      nodeId.hashCode ^
+      imageUrl.hashCode ^
+      selection.hashCode ^
+      selectionColor.hashCode ^
+      caret.hashCode ^
+      caretColor.hashCode;
 }
 
 /// Displays an image in a document.
@@ -101,26 +166,28 @@ class ImageComponent extends StatelessWidget {
     required this.componentKey,
     required this.imageUrl,
     this.selectionColor = Colors.blue,
-    this.isSelected = false,
+    this.selection,
+    required this.caretColor,
+    this.showCaret = false,
   }) : super(key: key);
 
   final GlobalKey componentKey;
   final String imageUrl;
   final Color selectionColor;
-  final bool isSelected;
+  final UpstreamDownstreamNodeSelection? selection;
+  final Color caretColor;
+  final bool showCaret;
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: BoxComponent(
-        key: componentKey,
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(
-              width: 1,
-              color: isSelected ? selectionColor : Colors.transparent,
-            ),
-          ),
+      child: SelectableBox(
+        selection: selection,
+        selectionColor: selectionColor,
+        caretColor: caretColor,
+        showCaret: showCaret,
+        child: BoxComponent(
+          key: componentKey,
           child: Image.network(
             imageUrl,
             fit: BoxFit.contain,
@@ -129,24 +196,4 @@ class ImageComponent extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Component builder that returns an [ImageComponent] when
-/// [componentContext.documentNode] is an [ImageNode].
-Widget? imageBuilder(ComponentContext componentContext) {
-  if (componentContext.documentNode is! ImageNode) {
-    return null;
-  }
-
-  final selection =
-      componentContext.nodeSelection == null ? null : componentContext.nodeSelection!.nodeSelection as BinarySelection;
-  final isSelected = selection != null && selection.position.isIncluded;
-
-  return ImageComponent(
-    componentKey: componentContext.componentKey,
-    imageUrl: (componentContext.documentNode as ImageNode).imageUrl,
-    isSelected: isSelected,
-    selectionColor: (componentContext.extensions[selectionStylesExtensionKey] as SelectionStyle?)?.selectionColor ??
-        Colors.transparent,
-  );
 }

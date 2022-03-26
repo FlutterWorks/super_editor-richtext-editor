@@ -56,20 +56,15 @@ class InsideTheToolbox extends StatelessWidget {
       title: 'SuperTextField',
       description:
           "SuperTextField is a custom implementation of a text field based on the same philosophy as Super Editor.",
-      demo: SizedBox(
+      demo: Container(
         width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(4),
+        ),
         child: SuperTextField(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           textStyleBuilder: _textfieldStyleBuilder,
-          decorationBuilder: (context, child) {
-            return Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: child,
-            );
-          },
           hintBuilder: (context) {
             return Text(
               'start typing here...',
@@ -122,7 +117,7 @@ class InsideTheToolbox extends StatelessWidget {
     return _buildToolDescription(
       title: 'AttributedText',
       description: "At the heart of everything in Super Editor is AttributedText, a representation of text along with"
-          " any number of \"attributions\". These attributions can represent styles, like bold and italics, or more "
+          ' any number of "attributions". These attributions can represent styles, like bold and italics, or more '
           "complicated things like links.\n\nThe closest thing that Flutter offers to Super Editor's AttributedText "
           "is TextSpans, which are used for applying partial styles to text. But TextSpans include rendering-specific"
           " references, and they don't support overlapping spans. AttributedText has nothing to do with rendering, "
@@ -132,9 +127,9 @@ class InsideTheToolbox extends StatelessWidget {
   }
 
   Widget _buildToolDescription({
-    @required String title,
-    @required String description,
-    @required Widget demo,
+    required String title,
+    required String description,
+    required Widget demo,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 60.0),
@@ -181,11 +176,12 @@ class _AttributedTextDemo extends StatefulWidget {
 }
 
 class _AttributedTextDemoState extends State<_AttributedTextDemo> {
-  final List<TextRange> _boldRanges = [];
-  final List<TextRange> _italicsRanges = [];
-  final List<TextRange> _strikethroughRanges = [];
-  TextSpan _richText;
-  String _plainText;
+  final List<SpanRange> _boldRanges = [];
+  final List<SpanRange> _italicsRanges = [];
+  final List<SpanRange> _strikethroughRanges = [];
+
+  late String _plainText;
+  late TextSpan _richText;
 
   @override
   void initState() {
@@ -251,7 +247,7 @@ class _AttributedTextDemoState extends State<_AttributedTextDemo> {
           _buildRowTitle('Attributed Text'),
           SuperSelectableText(
             key: GlobalKey(),
-            textSpan: _richText ?? const TextSpan(text: 'error'),
+            textSpan: _richText,
           ),
         ],
       ),
@@ -270,7 +266,7 @@ class _AttributedTextDemoState extends State<_AttributedTextDemo> {
     );
   }
 
-  Widget _buildCellSelector(List<TextRange> rangesToUpdate) {
+  Widget _buildCellSelector(List<SpanRange> rangesToUpdate) {
     return LayoutBuilder(builder: (context, constraints) {
       final cellWidth = constraints.maxWidth / _plainText.length;
 
@@ -291,8 +287,8 @@ class _AttributedTextDemoState extends State<_AttributedTextDemo> {
 
 class TextRangeSelector extends StatefulWidget {
   const TextRangeSelector({
-    Key key,
-    @required this.cellCount,
+    Key? key,
+    required this.cellCount,
     this.cellWidth = 10,
     this.cellHeight = 10,
     this.onRangesChange,
@@ -301,15 +297,15 @@ class TextRangeSelector extends StatefulWidget {
   final int cellCount;
   final double cellWidth;
   final double cellHeight;
-  final void Function(List<TextRange>) onRangesChange;
+  final void Function(List<SpanRange>)? onRangesChange;
 
   @override
   _TextRangeSelectorState createState() => _TextRangeSelectorState();
 }
 
 class _TextRangeSelectorState extends State<TextRangeSelector> {
-  List<bool> _selectedCells;
-  String _selectionMode;
+  late List<bool> _selectedCells;
+  String? _selectionMode;
 
   @override
   void initState() {
@@ -351,7 +347,7 @@ class _TextRangeSelectorState extends State<TextRangeSelector> {
       return;
     }
 
-    final ranges = <TextRange>[];
+    final ranges = <SpanRange>[];
     int rangeStart = -1;
     for (int i = 0; i < _selectedCells.length; ++i) {
       if (_selectedCells[i]) {
@@ -359,15 +355,15 @@ class _TextRangeSelectorState extends State<TextRangeSelector> {
           rangeStart = i;
         }
       } else if (rangeStart >= 0) {
-        ranges.add(TextRange(start: rangeStart, end: i - 1));
+        ranges.add(SpanRange(start: rangeStart, end: i - 1));
         rangeStart = -1;
       }
     }
     if (rangeStart >= 0) {
-      ranges.add(TextRange(start: rangeStart, end: widget.cellCount - 1));
+      ranges.add(SpanRange(start: rangeStart, end: widget.cellCount - 1));
     }
 
-    widget.onRangesChange(ranges);
+    widget.onRangesChange?.call(ranges);
   }
 
   @override

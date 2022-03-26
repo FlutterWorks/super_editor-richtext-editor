@@ -1,6 +1,6 @@
 name: super_editor
-description: Configurable, composeable, extensible text editor and document renderer for Flutter.
-version: 0.1.0
+description: Configurable, composable, extensible text editor and document renderer for Flutter.
+version: 0.2.0
 homepage: https://github.com/superlistapp/super_editor
 
 environment:
@@ -11,20 +11,22 @@ dependencies:
   flutter:
     sdk: flutter
 
+  attributed_text:
+    path: ../attributed_text
+  characters: ^1.2.0
   collection: ^1.15.0
   http: ^0.13.1
   linkify: ^4.0.0
   logging: ^1.0.1
-  # TODO: move markdown serialization to a separate package and
-  #       then remove this dependency.
-  markdown: ^4.0.0
   flutter_lints: ^1.0.0
+  flutter_test:
+    sdk: flutter
+  super_selectable_text:
+    path: ../super_selectable_text
   uuid: ^3.0.3
 
 dev_dependencies:
-  flutter_test:
-    sdk: flutter
-
+  golden_toolkit: ^0.11.0
   mockito: ^5.0.4
 
 flutter:

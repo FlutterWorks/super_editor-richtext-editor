@@ -1,15 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:super_editor/src/core/document.dart';
-import 'package:super_editor/src/core/document_editor.dart';
-import 'package:super_editor/src/default_editor/box_component.dart';
-import 'package:super_editor/src/default_editor/document_interaction.dart';
-import 'package:super_editor/src/default_editor/document_keyboard_actions.dart';
-import 'package:super_editor/src/default_editor/image.dart';
-import 'package:super_editor/src/default_editor/paragraph.dart';
-import 'package:super_editor/src/default_editor/text.dart';
-import 'package:super_editor/src/infrastructure/attributed_text.dart';
+import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
 import 'package:super_editor/src/infrastructure/platform_detector.dart';
+import 'package:super_editor/super_editor.dart';
 
 import '../_document_test_tools.dart';
 import '../_text_entry_test_tools.dart';
@@ -32,7 +25,7 @@ void main() {
                 editContext: _editContext,
                 keyEvent: const FakeRawKeyEvent(
                   data: FakeRawKeyEventData(
-                    logicalKey: LogicalKeyboardKey.meta,
+                    logicalKey: LogicalKeyboardKey.keyC,
                     physicalKey: PhysicalKeyboardKey.keyC,
                     isMetaPressed: true,
                     isModifierKeyPressed: false,
@@ -84,7 +77,7 @@ void main() {
                 editContext: _editContext,
                 keyEvent: const FakeRawKeyEvent(
                     data: FakeRawKeyEventData(
-                      logicalKey: LogicalKeyboardKey.meta,
+                      logicalKey: LogicalKeyboardKey.keyA,
                       physicalKey: PhysicalKeyboardKey.keyA,
                       isMetaPressed: true,
                       isModifierKeyPressed: false,
@@ -118,7 +111,7 @@ void main() {
                 editContext: _editContext,
                 keyEvent: const FakeRawKeyEvent(
                   data: FakeRawKeyEventData(
-                    logicalKey: LogicalKeyboardKey.meta,
+                    logicalKey: LogicalKeyboardKey.keyA,
                     physicalKey: PhysicalKeyboardKey.keyA,
                     isMetaPressed: true,
                     isModifierKeyPressed: false,
@@ -169,7 +162,7 @@ void main() {
                 editContext: _editContext,
                 keyEvent: const FakeRawKeyEvent(
                   data: FakeRawKeyEventData(
-                    logicalKey: LogicalKeyboardKey.meta,
+                    logicalKey: LogicalKeyboardKey.keyA,
                     physicalKey: PhysicalKeyboardKey.keyA,
                     isMetaPressed: true,
                     isModifierKeyPressed: false,
@@ -224,7 +217,7 @@ void main() {
                 editContext: _editContext,
                 keyEvent: const FakeRawKeyEvent(
                   data: FakeRawKeyEventData(
-                    logicalKey: LogicalKeyboardKey.meta,
+                    logicalKey: LogicalKeyboardKey.keyA,
                     physicalKey: PhysicalKeyboardKey.keyA,
                     isMetaPressed: true,
                     isModifierKeyPressed: false,
@@ -238,14 +231,14 @@ void main() {
                 _editContext.composer.selection!.base,
                 const DocumentPosition(
                   nodeId: 'image_1',
-                  nodePosition: BinaryNodePosition.included(),
+                  nodePosition: UpstreamDownstreamNodePosition.upstream(),
                 ),
               );
               expect(
                 _editContext.composer.selection!.extent,
                 const DocumentPosition(
                   nodeId: 'image_2',
-                  nodePosition: BinaryNodePosition.included(),
+                  nodePosition: UpstreamDownstreamNodePosition.downstream(),
                 ),
               );
 
@@ -254,6 +247,177 @@ void main() {
           );
         },
       );
+
+      group('key pressed with selection', () {
+        test('deletes selection if backspace is pressed', () {
+          Platform.setTestInstance(MacPlatform());
+
+          final _editContext = createEditContext(
+            document: MutableDocument(
+              nodes: [
+                ParagraphNode(
+                  id: '1',
+                  text: AttributedText(text: 'Text with [DELETEME] selection'),
+                ),
+              ],
+            ),
+            documentComposer: DocumentComposer(
+              initialSelection: const DocumentSelection(
+                base: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 11),
+                ),
+                extent: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 19),
+                ),
+              ),
+            ),
+          );
+
+          var result = anyCharacterOrDestructiveKeyToDeleteSelection(
+            editContext: _editContext,
+            keyEvent: const FakeRawKeyEvent(
+              data: FakeRawKeyEventData(
+                logicalKey: LogicalKeyboardKey.backspace,
+                physicalKey: PhysicalKeyboardKey.backspace,
+              ),
+            ),
+          );
+
+          expect(result, ExecutionInstruction.haltExecution);
+
+          final paragraph = _editContext.editor.document.nodes.first as ParagraphNode;
+          expect(paragraph.text.text, 'Text with [] selection');
+
+          expect(
+            _editContext.composer.selection,
+            equals(
+              const DocumentSelection.collapsed(
+                position: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 11),
+                ),
+              ),
+            ),
+          );
+
+          Platform.setTestInstance(null);
+        });
+
+        test('deletes selection if delete is pressed', () {
+          Platform.setTestInstance(MacPlatform());
+
+          final _editContext = createEditContext(
+            document: MutableDocument(
+              nodes: [
+                ParagraphNode(
+                  id: '1',
+                  text: AttributedText(text: 'Text with [DELETEME] selection'),
+                ),
+              ],
+            ),
+            documentComposer: DocumentComposer(
+              initialSelection: const DocumentSelection(
+                base: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 11),
+                ),
+                extent: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 19),
+                ),
+              ),
+            ),
+          );
+
+          var result = anyCharacterOrDestructiveKeyToDeleteSelection(
+            editContext: _editContext,
+            keyEvent: const FakeRawKeyEvent(
+              data: FakeRawKeyEventData(
+                logicalKey: LogicalKeyboardKey.delete,
+                physicalKey: PhysicalKeyboardKey.delete,
+              ),
+            ),
+          );
+
+          expect(result, ExecutionInstruction.haltExecution);
+
+          final paragraph = _editContext.editor.document.nodes.first as ParagraphNode;
+          expect(paragraph.text.text, 'Text with [] selection');
+
+          expect(
+            _editContext.composer.selection,
+            equals(
+              const DocumentSelection.collapsed(
+                position: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 11),
+                ),
+              ),
+            ),
+          );
+
+          Platform.setTestInstance(null);
+        });
+
+        test('deletes selection and inserts character', () {
+          Platform.setTestInstance(MacPlatform());
+
+          final _editContext = createEditContext(
+            document: MutableDocument(
+              nodes: [
+                ParagraphNode(
+                  id: '1',
+                  text: AttributedText(text: 'Text with [DELETEME] selection'),
+                ),
+              ],
+            ),
+            documentComposer: DocumentComposer(
+              initialSelection: const DocumentSelection(
+                base: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 11),
+                ),
+                extent: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 19),
+                ),
+              ),
+            ),
+          );
+
+          var result = anyCharacterOrDestructiveKeyToDeleteSelection(
+            editContext: _editContext,
+            keyEvent: const FakeRawKeyEvent(
+              data: FakeRawKeyEventData(
+                logicalKey: LogicalKeyboardKey.keyA,
+                physicalKey: PhysicalKeyboardKey.keyA,
+              ),
+              character: 'a',
+            ),
+          );
+
+          expect(result, ExecutionInstruction.haltExecution);
+
+          final paragraph = _editContext.editor.document.nodes.first as ParagraphNode;
+          expect(paragraph.text.text, 'Text with [a] selection');
+
+          expect(
+            _editContext.composer.selection,
+            equals(
+              const DocumentSelection.collapsed(
+                position: DocumentPosition(
+                  nodeId: '1',
+                  nodePosition: TextNodePosition(offset: 12),
+                ),
+              ),
+            ),
+          );
+
+          Platform.setTestInstance(null);
+        });
+      });
     },
   );
 }

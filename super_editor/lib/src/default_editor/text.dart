@@ -1,8 +1,9 @@
+// ignore_for_file: avoid_renaming_method_parameters
+
 import 'dart:collection';
 import 'dart:math';
 
 import 'package:attributed_text/attributed_text.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide SelectableText;
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document.dart';
@@ -17,10 +18,10 @@ import 'package:super_editor/src/infrastructure/composable_text.dart';
 import 'package:super_editor/src/infrastructure/keyboard.dart';
 import 'package:super_editor/src/infrastructure/raw_key_event_extensions.dart';
 import 'package:super_editor/src/infrastructure/strings.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
-import 'document_input_keyboard.dart';
 import 'layout_single_column/layout_single_column.dart';
+import 'text_tools.dart';
 
 class TextNode extends DocumentNode with ChangeNotifier {
   TextNode({
@@ -96,6 +97,7 @@ class TextNode extends DocumentNode with ChangeNotifier {
     return TextNodeSelection(
       baseOffset: (base as TextNodePosition).offset,
       extentOffset: (extent as TextNodePosition).offset,
+      affinity: extent.affinity,
     );
   }
 
@@ -187,6 +189,29 @@ extension DocumentSelectionWithText on Document {
   }
 }
 
+extension Words on String {
+  /// Returns a list of [TextRange]s, one that spans every word in the [String]
+  /// ordered from upstream to downstream.
+  List<TextRange> calculateAllWordBoundaries() {
+    final List<TextRange> textSelections = [];
+    var offset = 0;
+
+    while (offset < length) {
+      if (this[offset] == ' ') {
+        offset++;
+        continue;
+      }
+
+      final currentPosition = TextPosition(offset: offset);
+      final textSelection = expandPositionToWord(text: this, textPosition: currentPosition);
+      textSelections.add(textSelection);
+
+      offset += textSelection.end - textSelection.start + 1;
+    }
+    return textSelections;
+  }
+}
+
 /// A logical selection within a [TextNode].
 ///
 /// The selection begins at [baseOffset] and ends at [extentOffset].
@@ -221,10 +246,10 @@ class TextNodeSelection extends TextSelection implements NodeSelection {
         );
 
   @override
-  TextNodePosition get base => TextNodePosition(offset: baseOffset);
+  TextNodePosition get base => TextNodePosition(offset: baseOffset, affinity: affinity);
 
   @override
-  TextNodePosition get extent => TextNodePosition(offset: extentOffset);
+  TextNodePosition get extent => TextNodePosition(offset: extentOffset, affinity: affinity);
 }
 
 /// A logical position within a [TextNode].
@@ -236,6 +261,16 @@ class TextNodePosition extends TextPosition implements NodePosition {
     required int offset,
     TextAffinity affinity = TextAffinity.downstream,
   }) : super(offset: offset, affinity: affinity);
+
+  TextNodePosition copyWith({
+    int? offset,
+    TextAffinity? affinity,
+  }) {
+    return TextNodePosition(
+      offset: offset ?? this.offset,
+      affinity: affinity ?? this.affinity,
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -270,18 +305,14 @@ mixin TextComponentViewModel on SingleColumnLayoutComponentViewModel {
   Color get selectionColor;
   set selectionColor(Color color);
 
-  TextPosition? get caret;
-  set caret(TextPosition? position);
-
-  Color get caretColor;
-  set caretColor(Color color);
-
   bool get highlightWhenEmpty;
   set highlightWhenEmpty(bool highlight);
 
   @override
   void applyStyles(Map<String, dynamic> styles) {
     super.applyStyles(styles);
+
+    textAlignment = styles["textAlign"] ?? textAlignment;
 
     textStyleBuilder = (attributions) {
       final baseStyle = styles["textStyle"] ?? noStyleBuilder({});
@@ -308,8 +339,6 @@ class TextWithHintComponent extends StatefulWidget {
     this.metadata = const {},
     this.textSelection,
     this.selectionColor = Colors.lightBlueAccent,
-    this.showCaret = false,
-    this.caretColor = Colors.black,
     this.highlightWhenEmpty = false,
     this.showDebugPaint = false,
   }) : super(key: key);
@@ -323,21 +352,19 @@ class TextWithHintComponent extends StatefulWidget {
   final Map<String, dynamic> metadata;
   final TextSelection? textSelection;
   final Color selectionColor;
-  final bool showCaret;
-  final Color caretColor;
   final bool highlightWhenEmpty;
   final bool showDebugPaint;
 
   @override
-  _TextWithHintComponentState createState() => _TextWithHintComponentState();
+  State createState() => _TextWithHintComponentState();
 }
 
 class _TextWithHintComponentState extends State<TextWithHintComponent>
     with ProxyDocumentComponent<TextWithHintComponent>, ProxyTextComposable {
-  final _childTextComponentKey = GlobalKey<_TextComponentState>();
+  final _childTextComponentKey = GlobalKey<TextComponentState>();
 
   @override
-  DocumentComponent<StatefulWidget> get childDocumentComponentKey => _childTextComponentKey.currentState!;
+  GlobalKey get childDocumentComponentKey => _childTextComponentKey;
 
   @override
   TextComposable get childTextComposable => _childTextComponentKey.currentState!;
@@ -359,8 +386,10 @@ class _TextWithHintComponentState extends State<TextWithHintComponent>
     return Stack(
       children: [
         if (widget.text.text.isEmpty)
-          Text.rich(
-            widget.hintText?.computeTextSpan(_styleBuilder) ?? const TextSpan(text: ''),
+          IgnorePointer(
+            child: Text.rich(
+              widget.hintText?.computeTextSpan(_styleBuilder) ?? const TextSpan(text: ''),
+            ),
           ),
         TextComponent(
           key: _childTextComponentKey,
@@ -371,8 +400,6 @@ class _TextWithHintComponentState extends State<TextWithHintComponent>
           metadata: widget.metadata,
           textSelection: widget.textSelection,
           selectionColor: widget.selectionColor,
-          showCaret: widget.showCaret,
-          caretColor: widget.caretColor,
           highlightWhenEmpty: widget.highlightWhenEmpty,
           showDebugPaint: widget.showDebugPaint,
         ),
@@ -394,8 +421,6 @@ class TextComponent extends StatefulWidget {
     this.metadata = const {},
     this.textSelection,
     this.selectionColor = Colors.lightBlueAccent,
-    this.showCaret = false,
-    this.caretColor = Colors.black,
     this.highlightWhenEmpty = false,
     this.showDebugPaint = false,
   }) : super(key: key);
@@ -407,41 +432,34 @@ class TextComponent extends StatefulWidget {
   final Map<String, dynamic> metadata;
   final TextSelection? textSelection;
   final Color selectionColor;
-  final bool showCaret;
-  final Color caretColor;
   final bool highlightWhenEmpty;
   final bool showDebugPaint;
 
   @override
-  _TextComponentState createState() => _TextComponentState();
+  TextComponentState createState() => TextComponentState();
 }
 
-class _TextComponentState extends State<TextComponent> with DocumentComponent implements TextComposable {
-  final _selectableTextKey = GlobalKey<SuperSelectableTextState>();
+@visibleForTesting
+class TextComponentState extends State<TextComponent> with DocumentComponent implements TextComposable {
+  final _textKey = GlobalKey<ProseTextState>();
+
+  @visibleForTesting
+  ProseTextLayout get textLayout => _textKey.currentState!.textLayout;
 
   @override
   TextNodePosition? getPositionAtOffset(Offset localOffset) {
-    final textLayout = _selectableTextKey.currentState;
-    final textPosition = textLayout?.getPositionAtOffset(localOffset);
-    if (textPosition == null) {
-      return null;
-    }
+    // TODO: Change this implementation to use exact position instead of nearest position
+    //       After extracting super_text, looking up the exact offset broke the
+    //       ability to tap into empty TextWithHintComponents. To fix this, we
+    //       switched to the nearest position. Add a different version of this
+    //       API for nearest position and then let clients pick the one that's
+    //       right for them.
+    final textPosition = textLayout.getPositionNearestToOffset(localOffset);
+    // if (textPosition == null) {
+    //   return null;
+    // }
 
-    // Rework the textPosition so that it reports a "downstream" affinity because
-    // the editor doesn't support "upstream" positions, yet.
-    //
-    // Applying the "-1" to switch from upstream to downstream works everywhere, except
-    // when the position is at the very end of the text. In that case, we leave the offset
-    // alone.
-    return TextNodePosition.fromTextPosition(textPosition.affinity == TextAffinity.downstream
-        // The textPosition is already "downstream", leave it alone.
-        ? textPosition
-        // The textPosition if "upstream", adjust it to become "downstream", unless
-        // the position sits at the very end of the text.
-        : TextPosition(
-            offset: textPosition.offset < widget.text.text.length ? textPosition.offset - 1 : textPosition.offset,
-            affinity: TextAffinity.downstream,
-          ));
+    return TextNodePosition.fromTextPosition(textPosition);
   }
 
   @override
@@ -449,7 +467,7 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
     if (nodePosition is! TextPosition) {
       throw Exception('Expected nodePosition of type TextPosition but received: $nodePosition');
     }
-    return _selectableTextKey.currentState!.getOffsetAtPosition(nodePosition);
+    return textLayout.getOffsetAtPosition(nodePosition);
   }
 
   @override
@@ -459,8 +477,7 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
     }
 
     final offset = getOffsetForPosition(nodePosition);
-    final lineHeight = _selectableTextKey.currentState!.getHeightForCaret(nodePosition) ??
-        _selectableTextKey.currentState!.getLineHeightAtPosition(nodePosition);
+    final lineHeight = textLayout.getHeightForCaret(nodePosition) ?? textLayout.getLineHeightAtPosition(nodePosition);
     return Rect.fromLTWH(offset.dx, offset.dy, 0, lineHeight);
   }
 
@@ -477,7 +494,7 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       baseOffset: baseNodePosition.offset,
       extentOffset: extentNodePosition.offset,
     );
-    final boxes = _selectableTextKey.currentState!.getBoxesForSelection(selection);
+    final boxes = textLayout.getBoxesForSelection(selection);
 
     Rect boundingBox = boxes.isNotEmpty ? boxes.first.toRect() : Rect.zero;
     for (int i = 1; i < boxes.length; ++i) {
@@ -495,12 +512,12 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
   @override
   TextNodePosition getBeginningPositionNearX(double x) {
     return TextNodePosition.fromTextPosition(
-      _selectableTextKey.currentState!.getPositionInFirstLineAtX(x),
+      textLayout.getPositionInFirstLineAtX(x),
     );
   }
 
   @override
-  TextNodePosition? movePositionLeft(NodePosition textPosition, [Set<MovementModifier>? movementModifiers]) {
+  TextNodePosition? movePositionLeft(NodePosition textPosition, [MovementModifier? movementModifier]) {
     if (textPosition is! TextNodePosition) {
       // We don't know how to interpret a non-text position.
       return null;
@@ -516,14 +533,12 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       return null;
     }
 
-    if (movementModifiers != null && movementModifiers.contains(MovementModifier.line)) {
+    if (movementModifier == MovementModifier.line) {
       return getPositionAtStartOfLine(
         TextNodePosition(offset: textPosition.offset),
       );
-    } else if (movementModifiers != null && movementModifiers.contains(MovementModifier.word)) {
-      final text = getContiguousTextAt(textPosition);
-
-      final newOffset = text.moveOffsetUpstreamByWord(textPosition.offset);
+    } else if (movementModifier == MovementModifier.word) {
+      final newOffset = getAllText().moveOffsetUpstreamByWord(textPosition.offset);
       if (newOffset == null) {
         return textPosition;
       }
@@ -531,13 +546,12 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       return TextNodePosition(offset: newOffset);
     }
 
-    final text = getContiguousTextAt(textPosition);
-    final newOffset = text.moveOffsetUpstreamByCharacter(textPosition.offset);
+    final newOffset = getAllText().moveOffsetUpstreamByCharacter(textPosition.offset);
     return newOffset != null ? TextNodePosition(offset: newOffset) : textPosition;
   }
 
   @override
-  TextNodePosition? movePositionRight(NodePosition textPosition, [Set<MovementModifier>? movementModifiers]) {
+  TextNodePosition? movePositionRight(NodePosition textPosition, [MovementModifier? movementModifier]) {
     if (textPosition is! TextNodePosition) {
       // We don't know how to interpret a non-text position.
       return null;
@@ -548,16 +562,15 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       return null;
     }
 
-    if (movementModifiers != null && movementModifiers.contains(MovementModifier.line)) {
+    if (movementModifier == MovementModifier.line) {
       final endOfLine = getPositionAtEndOfLine(
         TextNodePosition(offset: textPosition.offset),
       );
 
       final TextPosition endPosition = getEndPosition();
-      final text = getContiguousTextAt(endOfLine);
 
       // Note: we compare offset values because we don't care if the affinitys are equal
-      final isAutoWrapLine = endOfLine.offset != endPosition.offset && (text[endOfLine.offset] != '\n');
+      final isAutoWrapLine = endOfLine.offset != endPosition.offset && (widget.text.text[endOfLine.offset] != '\n');
 
       // Note: For lines that auto-wrap, moving the cursor to `offset` causes the
       //       cursor to jump to the next line because the cursor is placed after
@@ -575,10 +588,8 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
           ? TextNodePosition(offset: endOfLine.offset - 1)
           : TextNodePosition.fromTextPosition(endOfLine);
     }
-    if (movementModifiers != null && movementModifiers.contains(MovementModifier.word)) {
-      final text = getContiguousTextAt(textPosition);
-
-      final newOffset = text.moveOffsetDownstreamByWord(textPosition.offset);
+    if (movementModifier != null && movementModifier == MovementModifier.word) {
+      final newOffset = getAllText().moveOffsetDownstreamByWord(textPosition.offset);
       if (newOffset == null) {
         return textPosition;
       }
@@ -586,8 +597,7 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       return TextNodePosition(offset: newOffset);
     }
 
-    final text = getContiguousTextAt(textPosition);
-    final newOffset = text.moveOffsetDownstreamByCharacter(textPosition.offset);
+    final newOffset = getAllText().moveOffsetDownstreamByCharacter(textPosition.offset);
     return newOffset != null ? TextNodePosition(offset: newOffset) : textPosition;
   }
 
@@ -636,13 +646,12 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
 
   @override
   TextNodePosition getEndPositionNearX(double x) {
-    return TextNodePosition.fromTextPosition(_selectableTextKey.currentState!.getPositionInLastLineAtX(x));
+    return TextNodePosition.fromTextPosition(textLayout.getPositionInLastLineAtX(x));
   }
 
   @override
   TextNodeSelection getSelectionInRange(Offset localBaseOffset, Offset localExtentOffset) {
-    return TextNodeSelection.fromTextSelection(
-        _selectableTextKey.currentState!.getSelectionInRect(localBaseOffset, localExtentOffset));
+    return TextNodeSelection.fromTextSelection(textLayout.getSelectionInRect(localBaseOffset, localExtentOffset));
   }
 
   @override
@@ -682,25 +691,45 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
 
   @override
   MouseCursor? getDesiredCursorAtOffset(Offset localOffset) {
-    return _selectableTextKey.currentState!.isTextAtOffset(localOffset) ? SystemMouseCursors.text : null;
+    return textLayout.isTextAtOffset(localOffset) ? SystemMouseCursors.text : null;
+  }
+
+  @override
+  String getAllText() {
+    return widget.text.text;
+  }
+
+  @override
+  String getContiguousTextAt(TextNodePosition textPosition) {
+    return getContiguousTextSelectionAt(textPosition).textInside(widget.text.text);
   }
 
   @override
   TextNodeSelection getWordSelectionAt(TextNodePosition textPosition) {
     return TextNodeSelection.fromTextSelection(
-      _selectableTextKey.currentState!.getWordSelectionAt(textPosition),
+      textLayout.getWordSelectionAt(textPosition),
     );
   }
 
   @override
-  String getContiguousTextAt(TextNodePosition textPosition) {
-    // This component only displays a single contiguous span of text.
-    // Therefore, all of our text is contiguous regardless of position.
-    // TODO: This assumption isn't true in the case that multiline text
-    //       is displayed within 1 node, such as when the user presses
-    //       shift+enter. Change implementation to find actual contiguous
-    //       text. (#54)
-    return widget.text.text;
+  TextNodeSelection getContiguousTextSelectionAt(TextNodePosition textPosition) {
+    final text = widget.text.text;
+    if (text.isEmpty) {
+      return const TextNodeSelection.collapsed(offset: -1);
+    }
+
+    int start = min(textPosition.offset, text.length - 1);
+    int end = min(textPosition.offset, text.length - 1);
+    while (start > 0 && text[start - 1] != '\n') {
+      start -= 1;
+    }
+    while (end < text.length && text[end] != '\n') {
+      end += 1;
+    }
+    return TextNodeSelection(
+      baseOffset: start,
+      extentOffset: end,
+    );
   }
 
   @override
@@ -709,7 +738,7 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       throw Exception('Expected position of type NodePosition but received ${textPosition.runtimeType}');
     }
 
-    final positionOneLineUp = _selectableTextKey.currentState!.getPositionOneLineUp(textPosition);
+    final positionOneLineUp = textLayout.getPositionOneLineUp(textPosition);
     if (positionOneLineUp == null) {
       return null;
     }
@@ -722,7 +751,7 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
       throw Exception('Expected position of type NodePosition but received ${textPosition.runtimeType}');
     }
 
-    final positionOneLineDown = _selectableTextKey.currentState!.getPositionOneLineDown(textPosition);
+    final positionOneLineDown = textLayout.getPositionOneLineDown(textPosition);
     if (positionOneLineDown == null) {
       return null;
     }
@@ -732,14 +761,14 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
   @override
   TextNodePosition getPositionAtEndOfLine(TextNodePosition textPosition) {
     return TextNodePosition.fromTextPosition(
-      _selectableTextKey.currentState!.getPositionAtEndOfLine(textPosition),
+      textLayout.getPositionAtEndOfLine(textPosition),
     );
   }
 
   @override
   TextNodePosition getPositionAtStartOfLine(TextNodePosition textNodePosition) {
     return TextNodePosition.fromTextPosition(
-      _selectableTextKey.currentState!.getPositionAtStartOfLine(textNodePosition),
+      textLayout.getPositionAtStartOfLine(textNodePosition),
     );
   }
 
@@ -747,16 +776,21 @@ class _TextComponentState extends State<TextComponent> with DocumentComponent im
   Widget build(BuildContext context) {
     editorLayoutLog.finer('Building a TextComponent with key: ${widget.key}');
 
-    return SuperSelectableText(
-      key: _selectableTextKey,
-      textSpan: widget.text.computeTextSpan(_textStyleWithBlockType),
-      textAlign: widget.textAlign ?? TextAlign.left,
-      textDirection: widget.textDirection ?? TextDirection.ltr,
-      textSelection: widget.textSelection ?? const TextSelection.collapsed(offset: -1),
-      textSelectionDecoration: TextSelectionDecoration(selectionColor: widget.selectionColor),
-      showCaret: widget.showCaret,
-      textCaretFactory: TextCaretFactory(color: widget.caretColor),
-      highlightWhenEmpty: widget.highlightWhenEmpty,
+    return IgnorePointer(
+      child: SuperTextWithSelection.single(
+        key: _textKey,
+        richText: widget.text.computeTextSpan(_textStyleWithBlockType),
+        textAlign: widget.textAlign ?? TextAlign.left,
+        textDirection: widget.textDirection ?? TextDirection.ltr,
+        userSelection: UserSelection(
+          highlightStyle: SelectionHighlightStyle(
+            color: widget.selectionColor,
+          ),
+          selection: widget.textSelection ?? const TextSelection.collapsed(offset: -1),
+          highlightWhenEmpty: widget.highlightWhenEmpty,
+          hasCaret: false,
+        ),
+      ),
     );
   }
 
@@ -852,9 +886,17 @@ class AddTextAttributionsCommand implements EditorCommand {
         final node = entry.key;
         final range = entry.value.toSpanRange();
         editorDocLog.info(' - adding attribution: $attribution. Range: $range');
-        node.text.addAttribution(
-          attribution,
-          range,
+
+        // Create a new AttributedText with updated attribution spans, so that the presentation system can
+        // see that we made a change, and re-renders the text in the document.
+        node.text = AttributedText(
+          text: node.text.text,
+          spans: node.text.spans.copy()
+            ..addAttribution(
+              newAttribution: attribution,
+              start: range.start,
+              end: range.end,
+            ),
         );
       }
     }
@@ -940,9 +982,17 @@ class RemoveTextAttributionsCommand implements EditorCommand {
         final node = entry.key;
         final range = entry.value.toSpanRange();
         editorDocLog.info(' - removing attribution: $attribution. Range: $range');
-        node.text.removeAttribution(
-          attribution,
-          range,
+
+        // Create a new AttributedText with updated attribution spans, so that the presentation system can
+        // see that we made a change, and re-renders the text in the document.
+        node.text = AttributedText(
+          text: node.text.text,
+          spans: node.text.spans.copy()
+            ..removeAttribution(
+              attributionToRemove: attribution,
+              start: range.start,
+              end: range.end,
+            ),
         );
       }
     }
@@ -1038,9 +1088,17 @@ class ToggleTextAttributionsCommand implements EditorCommand {
         final node = entry.key;
         final range = entry.value;
         editorDocLog.info(' - toggling attribution: $attribution. Range: $range');
-        node.text.toggleAttribution(
-          attribution,
-          range,
+
+        // Create a new AttributedText with updated attribution spans, so that the presentation system can
+        // see that we made a change, and re-renders the text in the document.
+        node.text = AttributedText(
+          text: node.text.text,
+          spans: node.text.spans.copy()
+            ..toggleAttribution(
+              attribution: attribution,
+              start: range.start,
+              end: range.end,
+            ),
         );
       }
     }
@@ -1069,10 +1127,37 @@ class InsertTextCommand implements EditorCommand {
     }
 
     final textOffset = (documentPosition.nodePosition as TextPosition).offset;
+
     textNode.text = textNode.text.insertString(
       textToInsert: textToInsert,
       startOffset: textOffset,
       applyAttributions: attributions,
+    );
+  }
+}
+
+class InsertAttributedTextCommand implements EditorCommand {
+  InsertAttributedTextCommand({
+    required this.documentPosition,
+    required this.textToInsert,
+  }) : assert(documentPosition.nodePosition is TextPosition);
+
+  final DocumentPosition documentPosition;
+  final AttributedText textToInsert;
+
+  @override
+  void execute(Document document, DocumentEditorTransaction transaction) {
+    final textNode = document.getNodeById(documentPosition.nodeId);
+    if (textNode is! TextNode) {
+      editorDocLog.shout('ERROR: can\'t insert text in a node that isn\'t a TextNode: $textNode');
+      return;
+    }
+
+    final textOffset = (documentPosition.nodePosition as TextPosition).offset;
+
+    textNode.text = textNode.text.insert(
+      textToInsert: textToInsert,
+      startOffset: textOffset,
     );
   }
 }
@@ -1110,12 +1195,7 @@ ExecutionInstruction anyCharacterToInsertInTextContent({
   // On web, keys like shift and alt are sending their full name
   // as a character, e.g., "Shift" and "Alt". This check prevents
   // those keys from inserting their name into content.
-  //
-  // This filter is a blacklist, and therefore it will fail to
-  // catch any key that isn't explicitly listed. The eventual solution
-  // to this is for the web to honor the standard key event contract,
-  // but that's out of our control.
-  if (kIsWeb && webBugBlacklistCharacters.contains(character)) {
+  if (isKeyEventCharacterBlacklisted(character) && character != 'Tab') {
     return ExecutionInstruction.continueExecution;
   }
 

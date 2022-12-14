@@ -1,5 +1,4 @@
 import 'package:attributed_text/attributed_text.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document.dart';
@@ -12,7 +11,6 @@ import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
 import 'package:super_editor/src/infrastructure/keyboard.dart';
 import 'package:super_editor/src/infrastructure/raw_key_event_extensions.dart';
 
-import 'document_input_keyboard.dart';
 import 'layout_single_column/layout_single_column.dart';
 import 'text_tools.dart';
 
@@ -68,7 +66,6 @@ class ParagraphComponentBuilder implements ComponentBuilder {
       textDirection: textDirection,
       textAlignment: textAlign,
       selectionColor: const Color(0x00000000),
-      caretColor: const Color(0x00000000),
     );
   }
 
@@ -80,10 +77,6 @@ class ParagraphComponentBuilder implements ComponentBuilder {
     }
 
     editorLayoutLog.fine("Building paragraph component for node: ${componentViewModel.nodeId}");
-
-    if (componentViewModel.caret != null) {
-      editorLayoutLog.finer(' - painting caret in paragraph');
-    }
 
     if (componentViewModel.selection != null) {
       editorLayoutLog.finer(' - painting a text selection:');
@@ -106,8 +99,6 @@ class ParagraphComponentBuilder implements ComponentBuilder {
       textDirection: componentViewModel.textDirection,
       textSelection: componentViewModel.selection,
       selectionColor: componentViewModel.selectionColor,
-      showCaret: componentViewModel.caret != null,
-      caretColor: componentViewModel.caretColor,
       highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
     );
   }
@@ -125,8 +116,6 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
     this.textAlignment = TextAlign.left,
     this.selection,
     required this.selectionColor,
-    this.caret,
-    required this.caretColor,
     this.highlightWhenEmpty = false,
   }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
 
@@ -143,10 +132,6 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
   @override
   Color selectionColor;
   @override
-  TextPosition? caret;
-  @override
-  Color caretColor;
-  @override
   bool highlightWhenEmpty;
 
   @override
@@ -162,8 +147,6 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       textAlignment: textAlignment,
       selection: selection,
       selectionColor: selectionColor,
-      caret: caret,
-      caretColor: caretColor,
       highlightWhenEmpty: highlightWhenEmpty,
     );
   }
@@ -177,13 +160,10 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
           nodeId == other.nodeId &&
           blockType == other.blockType &&
           text == other.text &&
-          textStyleBuilder == other.textStyleBuilder &&
           textDirection == other.textDirection &&
           textAlignment == other.textAlignment &&
           selection == other.selection &&
           selectionColor == other.selectionColor &&
-          caret == other.caret &&
-          caretColor == other.caretColor &&
           highlightWhenEmpty == other.highlightWhenEmpty;
 
   @override
@@ -192,13 +172,10 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       nodeId.hashCode ^
       blockType.hashCode ^
       text.hashCode ^
-      textStyleBuilder.hashCode ^
       textDirection.hashCode ^
       textAlignment.hashCode ^
       selection.hashCode ^
       selectionColor.hashCode ^
-      caret.hashCode ^
-      caretColor.hashCode ^
       highlightWhenEmpty.hashCode;
 }
 
@@ -337,15 +314,11 @@ ExecutionInstruction anyCharacterToInsertInParagraph({
   if (LogicalKeyboardKey.isControlCharacter(keyEvent.character!) || keyEvent.isArrowKeyPressed) {
     return ExecutionInstruction.continueExecution;
   }
+
   // On web, keys like shift and alt are sending their full name
   // as a character, e.g., "Shift" and "Alt". This check prevents
   // those keys from inserting their name into content.
-  //
-  // This filter is a blacklist, and therefore it will fail to
-  // catch any key that isn't explicitly listed. The eventual solution
-  // to this is for the web to honor the standard key event contract,
-  // but that's out of our control.
-  if (kIsWeb && webBugBlacklistCharacters.contains(character)) {
+  if (isKeyEventCharacterBlacklisted(character) && character != 'Tab') {
     return ExecutionInstruction.continueExecution;
   }
 

@@ -1,10 +1,10 @@
+import 'dart:io';
 import 'dart:math';
 import 'dart:ui';
 
 import 'package:attributed_text/attributed_text.dart';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:linkify/linkify.dart';
@@ -17,15 +17,12 @@ import 'package:super_editor/src/default_editor/list_items.dart';
 import 'package:super_editor/src/default_editor/paragraph.dart';
 import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
 import 'package:super_editor/src/default_editor/text.dart';
-import 'package:super_editor/src/default_editor/text_tools.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 
 import 'attributions.dart';
 import 'horizontal_rule.dart';
 import 'image.dart';
-import 'list_items.dart';
 import 'multi_node_editing.dart';
-import 'text.dart';
 import 'text_tools.dart';
 
 /// Performs common, high-level editing and composition tasks
@@ -37,12 +34,6 @@ import 'text_tools.dart';
 /// is built on top of [DocumentEditor], [DocumentLayout], and
 /// [DocumentComposer]. Use those core artifacts to implement any
 /// operations that are not supported by [CommonEditorOperations].
-///
-/// For example, compare the following [CommonEditorOperations] calls
-/// to their respective implementation:
-/// TODO: show 2-3 examples that compare the [CommonEditorOperations]
-///       call with the comparable implementation to make it clear
-///       that anything this class does, the developer can do directly.
 ///
 /// If you implement operations for your editor that are not provided
 /// by [CommonEditorOperations], consider implementing those operations
@@ -190,59 +181,6 @@ class CommonEditorOperations {
     return true;
   }
 
-  /// Given a selection in a [TextNode], expands the [DocumentComposer]'s
-  /// selection to include the entire paragraph in which the current
-  /// selection sits.
-  ///
-  /// Returns [true] if a paragraph was selected. Returns [false] if no
-  /// selection could be computed, e.g., the existing selection spanned
-  /// more than one paragraph, the selection spanned multiple nodes,
-  /// the selection was not in a [TextNode].
-  bool selectSurroundingParagraph() {
-    if (composer.selection == null) {
-      return false;
-    }
-    if (composer.selection!.base.nodeId != composer.selection!.extent.nodeId) {
-      return false;
-    }
-
-    final selectedNode = editor.document.getNodeById(composer.selection!.extent.nodeId);
-    if (selectedNode is! TextNode) {
-      return false;
-    }
-
-    final docSelection = composer.selection!;
-    final currentSelection = TextSelection(
-      baseOffset: (docSelection.base.nodePosition as TextNodePosition).offset,
-      extentOffset: (docSelection.extent.nodePosition as TextNodePosition).offset,
-    );
-    final selectedText = currentSelection.textInside(selectedNode.text.text);
-
-    if (selectedText.contains('\n')) {
-      // The selection already spans multiple paragraphs. Nothing to do.
-      return false;
-    }
-
-    final paragraphTextSelection = expandPositionToParagraph(
-      text: selectedNode.text.text,
-      textPosition: TextPosition(offset: (docSelection.extent.nodePosition as TextNodePosition).offset),
-    );
-    final paragraphNodeSelection = TextNodeSelection.fromTextSelection(paragraphTextSelection);
-
-    composer.selection = DocumentSelection(
-      base: DocumentPosition(
-        nodeId: selectedNode.id,
-        nodePosition: paragraphNodeSelection.base,
-      ),
-      extent: DocumentPosition(
-        nodeId: selectedNode.id,
-        nodePosition: paragraphNodeSelection.extent,
-      ),
-    );
-
-    return true;
-  }
-
   /// Sets the [DocumentComposer]'s selection to include the entire
   /// [Document].
   ///
@@ -291,20 +229,20 @@ class CommonEditorOperations {
   /// change it's visual state when it's selected.
   /// {@endtemplate}
   ///
-  /// Expands/contracts the selection if [expand] is [true], otherwise
+  /// Expands/contracts the selection if [expand] is `true`, otherwise
   /// collapses the selection or keeps it collapsed.
   ///
   /// By default, moves one character at a time when the extent sits in
   /// a [TextNode]. To move word-by-word, pass [MovementModifier.word]
-  /// in [movementModifiers]. To move to the beginning of a line, pass
-  /// [MovementModifier.line] in [movementModifiers].
+  /// in [movementModifier]. To move to the beginning of a line, pass
+  /// [MovementModifier.line] in [movementModifier].
   ///
   /// Returns [true] if the extent moved, or the selection changed, e.g., the
   /// selection collapsed but the extent stayed in the same place. Returns
   /// [false] if the extent did not move and the selection did not change.
   bool moveCaretUpstream({
     bool expand = false,
-    Set<MovementModifier> movementModifiers = const {},
+    MovementModifier? movementModifier,
   }) {
     if (composer.selection == null) {
       return false;
@@ -328,7 +266,7 @@ class CommonEditorOperations {
 
     String newExtentNodeId = nodeId;
     NodePosition? newExtentNodePosition =
-        extentComponent.movePositionLeft(currentExtent.nodePosition, movementModifiers);
+        extentComponent.movePositionLeft(currentExtent.nodePosition, movementModifier);
 
     if (newExtentNodePosition == null) {
       // Move to next node
@@ -377,15 +315,15 @@ class CommonEditorOperations {
   ///
   /// By default, moves one character at a time when the extent sits in
   /// a [TextNode]. To move word-by-word, pass [MovementModifier.word]
-  /// in [movementModifiers]. To move to the end of a line, pass
-  /// [MovementModifier.line] in [movementModifiers].
+  /// in [movementModifier]. To move to the end of a line, pass
+  /// [MovementModifier.line] in [movementModifier].
   ///
   /// Returns [true] if the extent moved, or the selection changed, e.g., the
   /// selection collapsed but the extent stayed in the same place. Returns
   /// [false] if the extent did not move and the selection did not change.
   bool moveCaretDownstream({
     bool expand = false,
-    Set<MovementModifier> movementModifiers = const {},
+    MovementModifier? movementModifier,
   }) {
     if (composer.selection == null) {
       return false;
@@ -409,7 +347,7 @@ class CommonEditorOperations {
 
     String newExtentNodeId = nodeId;
     NodePosition? newExtentNodePosition =
-        extentComponent.movePositionRight(currentExtent.nodePosition, movementModifiers);
+        extentComponent.movePositionRight(currentExtent.nodePosition, movementModifier);
 
     if (newExtentNodePosition == null) {
       // Move to next node
@@ -583,6 +521,57 @@ class CommonEditorOperations {
       nodePosition: newExtentNodePosition,
     );
 
+    _updateSelectionExtent(position: newExtent, expandSelection: expand);
+
+    return true;
+  }
+
+  /// Moves the [DocumentComposer]'s selection to the nearest node to [startingNode],
+  /// whose [DocumentComponent] is visually selectable.
+  ///
+  /// Expands the selection if [expand] is `true`, otherwise collapses the selection.
+  ///
+  /// If a downstream selectable node if found, it will be used, otherwise,
+  /// a upstream selectable node will be searched.
+  ///
+  /// If a selectable node is found, the selection will move to its beginning.
+  /// If no selectable node is found, the selection will remain unchanged.
+  ///
+  /// Returns `true` if the selection is moved and `false` otherwise, e.g., there
+  /// are no selectable nodes in the document.
+  bool moveSelectionToNearestSelectableNode(
+    DocumentNode startingNode, {
+    bool expand = false,
+  }) {
+    String? newNodeId;
+    NodePosition? newPosition;
+
+    // Try to find a new selection downstream.
+    final downstreamNode = _getDownstreamSelectableNodeAfter(startingNode);
+    if (downstreamNode != null) {
+      newNodeId = downstreamNode.id;
+      final nextComponent = documentLayoutResolver().getComponentByNodeId(newNodeId);
+      newPosition = nextComponent?.getBeginningPosition();
+    }
+
+    // Try to find a new selection upstream.
+    if (newPosition == null) {
+      final upstreamNode = _getUpstreamSelectableNodeBefore(startingNode);
+      if (upstreamNode != null) {
+        newNodeId = upstreamNode.id;
+        final previousComponent = documentLayoutResolver().getComponentByNodeId(newNodeId);
+        newPosition = previousComponent?.getBeginningPosition();
+      }
+    }
+
+    if (newNodeId == null || newPosition == null) {
+      return false;
+    }
+
+    final newExtent = DocumentPosition(
+      nodeId: newNodeId,
+      nodePosition: newPosition,
+    );
     _updateSelectionExtent(position: newExtent, expandSelection: expand);
 
     return true;
@@ -1118,14 +1107,14 @@ class CommonEditorOperations {
     if (baseNode == null) {
       throw Exception('Failed to _getDocumentPositionAfterDeletion because the base node no longer exists.');
     }
-    final baseNodeIndex = document.getNodeIndex(baseNode);
+    final baseNodeIndex = document.getNodeIndexById(baseNode.id);
 
     final extentPosition = selection.extent;
     final extentNode = document.getNode(extentPosition);
     if (extentNode == null) {
       throw Exception('Failed to _getDocumentPositionAfterDeletion because the extent node no longer exists.');
     }
-    final extentNodeIndex = document.getNodeIndex(extentNode);
+    final extentNodeIndex = document.getNodeIndexById(extentNode.id);
 
     final topNodeIndex = min(baseNodeIndex, extentNodeIndex);
     final topNode = document.getNodeAt(topNodeIndex)!;
@@ -1436,6 +1425,7 @@ class CommonEditorOperations {
       return false;
     }
 
+    editorOpsLog.fine("Running pattern matching on a ParagraphNode, to convert it to another node type.");
     final text = node.text;
     final textSelection = composer.selection!.extent.nodePosition as TextNodePosition;
     final textBeforeCaret = text.text.substring(0, textSelection.offset);
@@ -1484,7 +1474,7 @@ class CommonEditorOperations {
       editorOpsLog.fine('Paragraph has an HR match');
       // Insert an HR before this paragraph and then clear the
       // paragraph's content.
-      final paragraphNodeIndex = editor.document.getNodeIndex(node);
+      final paragraphNodeIndex = editor.document.getNodeIndexById(node.id);
 
       editor.executeCommand(
         EditorCommandFunction((document, transaction) {
@@ -1549,11 +1539,13 @@ class CommonEditorOperations {
           humanize: false,
         ));
     final int linkCount = extractedLinks.fold(0, (value, element) => element is UrlElement ? value + 1 : value);
+    editorOpsLog.fine("Found $linkCount link(s)");
     final String nonEmptyText =
         extractedLinks.fold('', (value, element) => element is TextElement ? value + element.text.trim() : value);
     if (linkCount == 1 && nonEmptyText.isEmpty) {
       // This node's text is just a URL, try to interpret it
       // as a known type.
+      editorOpsLog.fine("The whole node is one big URL. Trying to convert the node type based on pattern matching...");
       final link = extractedLinks.firstWhereOrNull((element) => element is UrlElement)!.text;
       _processUrlNode(
         document: editor.document,
@@ -1566,6 +1558,7 @@ class CommonEditorOperations {
     }
 
     // No pattern match was found
+    editorOpsLog.fine("ParagraphNode didn't match any conversion pattern.");
     return false;
   }
 
@@ -1576,7 +1569,20 @@ class CommonEditorOperations {
     required String originalText,
     required String url,
   }) async {
-    final response = await http.get(Uri.parse(url));
+    late http.Response response;
+
+    // This function throws [SocketException] when the [url] is not valid.
+    // For instance, when typing for https://f|, it throws
+    // Unhandled Exception: SocketException: Failed host lookup: 'f'
+    //
+    // It doesn't affect any functionality, but it throws exception and preventing
+    // any related test to pass
+    try {
+      response = await http.get(Uri.parse(url));
+    } on SocketException catch (e) {
+      editorOpsLog.fine('Failed to load URL: ${e.message}');
+      return;
+    }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       editorOpsLog.fine('Failed to load URL: ${response.statusCode} - ${response.reasonPhrase}');
@@ -1680,7 +1686,9 @@ class CommonEditorOperations {
   /// Returns [true] if a new node was inserted or a node was split into two.
   /// Returns [false] if there was no selection.
   bool insertBlockLevelNewline() {
+    editorOpsLog.fine("Inserting block-level newline");
     if (composer.selection == null) {
+      editorOpsLog.finer("Selection is null. Can't insert newline.");
       return false;
     }
 
@@ -1688,12 +1696,14 @@ class CommonEditorOperations {
     final baseNode = editor.document.getNodeById(composer.selection!.base.nodeId)!;
     final extentNode = editor.document.getNodeById(composer.selection!.extent.nodeId)!;
     if (baseNode.id != extentNode.id) {
+      editorOpsLog.finer("The selection spans multiple nodes. Can't insert block-level newline.");
       return false;
     }
 
     if (!composer.selection!.isCollapsed) {
       // The selection is not collapsed. Delete the selected content first,
       // then continue the process.
+      editorOpsLog.finer("Deleting selection before inserting block-level newline");
       _deleteExpandedSelection();
     }
 
@@ -1702,10 +1712,13 @@ class CommonEditorOperations {
     if (extentNode is ListItemNode) {
       if (extentNode.text.text.isEmpty) {
         // The list item is empty. Convert it to a paragraph.
+        editorOpsLog.finer(
+            "The current node is an empty list item. Converting it to a paragraph instead of inserting block-level newline.");
         return convertToParagraph();
       }
 
       // Split the list item into two.
+      editorOpsLog.finer("Splitting list item in two.");
       editor.executeCommand(
         SplitListItemCommand(
           nodeId: extentNode.id,
@@ -1719,6 +1732,7 @@ class CommonEditorOperations {
       final currentExtentPosition = composer.selection!.extent.nodePosition as TextNodePosition;
       final endOfParagraph = extentNode.endPosition;
 
+      editorOpsLog.finer("Splitting paragraph in two.");
       editor.executeCommand(
         SplitParagraphCommand(
           nodeId: extentNode.id,
@@ -1732,6 +1746,7 @@ class CommonEditorOperations {
       if (extentPosition.affinity == TextAffinity.downstream) {
         // The caret sits on the downstream edge of block-level content. Insert
         // a new paragraph after this node.
+        editorOpsLog.finer("Inserting paragraph after block-level node.");
         editor.executeCommand(EditorCommandFunction((doc, transaction) {
           transaction.insertNodeAfter(
             existingNode: extentNode,
@@ -1744,6 +1759,7 @@ class CommonEditorOperations {
       } else {
         // The caret sits on the upstream edge of block-level content. Insert
         // a new paragraph before this node.
+        editorOpsLog.finer("Inserting paragraph before block-level node.");
         editor.executeCommand(EditorCommandFunction((doc, transaction) {
           transaction.insertNodeBefore(
             existingNode: extentNode,
@@ -1756,6 +1772,7 @@ class CommonEditorOperations {
       }
     } else {
       // We don't know how to handle this type of node position. Do nothing.
+      editorOpsLog.fine("Can't insert new block-level inline because we don't recognize the selected content type.");
       return false;
     }
 
@@ -2245,102 +2262,137 @@ class _PasteEditorCommand implements EditorCommand {
 
   @override
   void execute(Document document, DocumentEditorTransaction transaction) {
-    final splitContent = _content.split('\n\n');
-    editorOpsLog.fine('Split content:');
-    for (final piece in splitContent) {
-      editorOpsLog.fine(' - "$piece"');
-    }
-
     final currentNodeWithSelection = document.getNodeById(_pastePosition.nodeId);
+    if (currentNodeWithSelection is! ParagraphNode) {
+      throw Exception('Can\'t handle pasting text within node of type: $currentNodeWithSelection');
+    }
 
-    DocumentPosition? newSelectionPosition;
+    editorOpsLog.info("Pasting clipboard content in document.");
 
-    if (currentNodeWithSelection is TextNode) {
-      final textNode = document.getNode(_pastePosition) as TextNode;
-      final pasteTextOffset = (_pastePosition.nodePosition as TextPosition).offset;
-      final attributionsAtPasteOffset = textNode.text.getAllAttributionsAt(pasteTextOffset);
+    // Split the pasted content at newlines, and apply attributions based
+    // on inspection of the pasted content, e.g., link attributions.
+    final attributedLines = _inferAttributionsForLinesOfPastedText(_content);
 
-      if (splitContent.length > 1 && pasteTextOffset < textNode.endPosition.offset) {
-        // There is more than 1 node of content being pasted. Therefore,
-        // new nodes will need to be added, which means that the currently
-        // selected text node will be split at the current text offset.
-        // Configure a new node to be added at the end of the pasted content
-        // which contains the trailing text from the currently selected
-        // node.
-        if (currentNodeWithSelection is ParagraphNode) {
-          SplitParagraphCommand(
-            nodeId: currentNodeWithSelection.id,
-            splitPosition: TextPosition(offset: pasteTextOffset),
-            newNodeId: DocumentEditor.createNodeId(),
-            replicateExistingMetadata: false,
-          ).execute(document, transaction);
-        } else {
-          throw Exception('Can\'t handle pasting text within node of type: $currentNodeWithSelection');
-        }
-      }
+    final textNode = document.getNode(_pastePosition) as TextNode;
+    final pasteTextOffset = (_pastePosition.nodePosition as TextPosition).offset;
 
-      // Paste the first piece of content into the selected TextNode.
-      InsertTextCommand(
-        documentPosition: _pastePosition,
-        textToInsert: splitContent.first,
-        attributions: attributionsAtPasteOffset,
-      ).execute(document, transaction);
-
-      // At this point in the paste process, the document selection
-      // position is at the end of the text that was just pasted.
-      newSelectionPosition = DocumentPosition(
+    if (attributedLines.length > 1 && pasteTextOffset < textNode.endPosition.offset) {
+      // There is more than 1 node of content being pasted. Therefore,
+      // new nodes will need to be added, which means that the currently
+      // selected text node will be split at the current text offset.
+      // Configure a new node to be added at the end of the pasted content
+      // which contains the trailing text from the currently selected
+      // node.
+      SplitParagraphCommand(
         nodeId: currentNodeWithSelection.id,
-        nodePosition: TextNodePosition(
-          offset: pasteTextOffset + splitContent.first.length,
-        ),
-      );
-
-      // Remove the pasted text from the list of pieces of text
-      // to paste.
-      splitContent.removeAt(0);
+        splitPosition: TextPosition(offset: pasteTextOffset),
+        newNodeId: DocumentEditor.createNodeId(),
+        replicateExistingMetadata: true,
+      ).execute(document, transaction);
     }
 
-    final newNodes = splitContent
-        .map(
-          // TODO: create nodes based on content inspection.
-          (nodeText) => ParagraphNode(
-            id: DocumentEditor.createNodeId(),
-            text: AttributedText(
-              text: nodeText,
-            ),
-          ),
-        )
-        .toList();
-    editorOpsLog.fine(' - new nodes: $newNodes');
+    // Paste the first piece of attributed content into the selected TextNode.
+    InsertAttributedTextCommand(
+      documentPosition: _pastePosition,
+      textToInsert: attributedLines.first,
+    ).execute(document, transaction);
 
-    int newNodeToMergeIndex = 0;
-    DocumentNode mergeAfterNode;
-
-    final nodeWithSelection = document.getNodeById(_pastePosition.nodeId);
-    if (nodeWithSelection == null) {
-      throw Exception(
-          'Failed to complete paste process because the node being pasted into disappeared from the document unexpectedly.');
-    }
-    mergeAfterNode = nodeWithSelection;
-
-    for (int i = newNodeToMergeIndex; i < newNodes.length; ++i) {
+    // The first line of pasted text was added to the selected paragraph.
+    // Now, create new nodes for each additional line of pasted text and
+    // insert those nodes.
+    final pastedContentNodes = _convertLinesToParagraphs(attributedLines.sublist(1));
+    DocumentNode previousNode = currentNodeWithSelection;
+    for (final pastedNode in pastedContentNodes) {
       transaction.insertNodeAfter(
-        existingNode: mergeAfterNode,
-        newNode: newNodes[i],
+        existingNode: previousNode,
+        newNode: pastedNode,
       );
-      mergeAfterNode = newNodes[i];
-
-      newSelectionPosition = DocumentPosition(
-        nodeId: mergeAfterNode.id,
-        nodePosition: mergeAfterNode.endPosition,
-      );
+      previousNode = pastedNode;
     }
 
+    // Place the caret at the end of the pasted content.
     _composer.selection = DocumentSelection.collapsed(
-      position: newSelectionPosition!,
+      position: pastedContentNodes.isNotEmpty
+          ? DocumentPosition(
+              nodeId: previousNode.id,
+              nodePosition: previousNode.endPosition,
+            )
+          : DocumentPosition(
+              nodeId: currentNodeWithSelection.id,
+              nodePosition: TextNodePosition(
+                offset: pasteTextOffset + attributedLines.first.text.length,
+              ),
+            ),
     );
-    editorOpsLog.fine(' - new selection: ${_composer.selection}');
+    editorOpsLog.fine('New selection after paste operation: ${_composer.selection}');
 
     editorOpsLog.fine('Done with paste command.');
+  }
+
+  /// Breaks the given [content] at each newline, then applies any inferred
+  /// attributions based on content analysis, e.g., surrounds URLs with
+  /// [LinkAttribution]s.
+  List<AttributedText> _inferAttributionsForLinesOfPastedText(String content) {
+    // Split the pasted content by newlines, because each new line of content
+    // needs to placed in its own ParagraphNode.
+    final lines = content.split('\n\n');
+    editorOpsLog.fine("Breaking pasted content into lines and adding attributions:");
+    editorOpsLog.fine("Lines of content:");
+    for (final line in lines) {
+      editorOpsLog.fine(' - "$line"');
+    }
+
+    final attributedLines = <AttributedText>[];
+    for (final line in lines) {
+      attributedLines.add(
+        AttributedText(
+          text: line,
+          spans: _findUrlSpansInText(pastedText: lines.first),
+        ),
+      );
+    }
+    return attributedLines;
+  }
+
+  /// Finds all URLs in the [pastedText] and returns an [AttributedSpans], which
+  /// contains [LinkAttribution]s that span each URL.
+  AttributedSpans _findUrlSpansInText({required String pastedText}) {
+    final AttributedSpans linkAttributionSpans = AttributedSpans();
+
+    final wordBoundaries = pastedText.calculateAllWordBoundaries();
+
+    for (final wordBoundary in wordBoundaries) {
+      final word = wordBoundary.textInside(pastedText);
+      final link = Uri.tryParse(word);
+
+      if (link != null && link.hasScheme && link.hasAuthority) {
+        // Valid url. Apply [LinkAttribution] to the url
+        final linkAttribution = LinkAttribution(url: link);
+
+        final startOffset = wordBoundary.start;
+        // -1 because TextPosition's offset indexes the character after the
+        // selection, not the final character in the selection.
+        final endOffset = wordBoundary.end - 1;
+
+        // Add link attribution.
+        linkAttributionSpans.addAttribution(
+          newAttribution: linkAttribution,
+          start: startOffset,
+          end: endOffset,
+        );
+      }
+    }
+
+    return linkAttributionSpans;
+  }
+
+  Iterable<ParagraphNode> _convertLinesToParagraphs(Iterable<AttributedText> attributedLines) {
+    return attributedLines.map(
+      // TODO: create nodes based on content inspection (e.g., image, list item).
+      (pastedLine) => ParagraphNode(
+        id: DocumentEditor.createNodeId(),
+        text: pastedLine,
+      ),
+    );
   }
 }

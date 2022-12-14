@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:super_editor/super_editor.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 /// Demo that displays a very limited iOS text field, constructed from
 /// the ground up, using [TextInput] for user interaction instead
@@ -36,9 +36,8 @@ class _BareBonesTextFieldWithInputClient extends StatefulWidget {
   _BareBonesTextFieldWithInputClientState createState() => _BareBonesTextFieldWithInputClientState();
 }
 
-class _BareBonesTextFieldWithInputClientState extends State<_BareBonesTextFieldWithInputClient>
-    implements TextInputClient {
-  final _textKey = GlobalKey();
+class _BareBonesTextFieldWithInputClientState extends State<_BareBonesTextFieldWithInputClient> with TextInputClient {
+  final _textKey = GlobalKey<ProseTextState>();
 
   late FocusNode _focusNode;
   String _currentText = 'This is a barebones textfield implemented with SuperSelectableText and TextInputClient.';
@@ -63,14 +62,14 @@ class _BareBonesTextFieldWithInputClientState extends State<_BareBonesTextFieldW
     super.dispose();
   }
 
+  ProseTextLayout get _textLayout => _textKey.currentState!.textLayout;
+
   TextPosition _getTextPositionAtOffset(Offset localOffset) {
-    final superSelectableTextState = _textKey.currentState as SuperSelectableTextState;
-    return superSelectableTextState.getPositionAtOffset(localOffset);
+    return _textLayout.getPositionAtOffset(localOffset)!;
   }
 
   Offset _getOffsetAtTextPosition(TextPosition position) {
-    final superSelectableTextState = _textKey.currentState as SuperSelectableTextState;
-    return superSelectableTextState.getOffsetAtPosition(position);
+    return _textLayout.getOffsetAtPosition(position);
   }
 
   void _onTextFieldTapUp(TapUpDetails details) {
@@ -167,6 +166,11 @@ class _BareBonesTextFieldWithInputClientState extends State<_BareBonesTextFieldW
   }
 
   @override
+  void performSelector(String selectorName) {
+    // TODO: implement this method starting with Flutter 3.3.4
+  }
+
+  @override
   void performPrivateCommand(String action, Map<String, dynamic> data) {
     print('My TextInputClient: performPrivateCommand() - action: $action, data: $data');
 
@@ -191,11 +195,6 @@ class _BareBonesTextFieldWithInputClientState extends State<_BareBonesTextFieldW
       _currentText = value.text;
       _currentSelection = value.selection;
     });
-  }
-
-  @override
-  void updateEditingValueWithDeltas(List<TextEditingDelta> deltas) {
-    // TODO: implement updateEditingValueWithDeltas
   }
 
   @override
@@ -246,15 +245,28 @@ class _BareBonesTextFieldWithInputClientState extends State<_BareBonesTextFieldW
           onPanUpdate: _focusNode.hasFocus ? _onPanUpdate : null,
           child: Stack(
             children: [
-              SuperSelectableText.plain(
+              SuperTextWithSelection.single(
                 key: _textKey,
-                text: _currentText.isNotEmpty ? _currentText : 'enter text',
-                textSelection: _currentSelection,
-                showCaret: true,
-                style: TextStyle(
-                  color: _currentText.isNotEmpty ? Colors.black : Colors.grey,
-                  fontSize: 18,
-                  height: 1.4,
+                richText: _currentText.isNotEmpty
+                    ? TextSpan(
+                        text: _currentText,
+                        style: TextStyle(
+                          color: _currentText.isNotEmpty ? Colors.black : Colors.grey,
+                          fontSize: 18,
+                          height: 1.4,
+                        ),
+                      )
+                    : const TextSpan(
+                        text: 'enter text',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 18,
+                          height: 1.4,
+                        ),
+                      ),
+                userSelection: UserSelection(
+                  selection: _currentSelection,
+                  hasCaret: true,
                 ),
               ),
               _buildFloatingCaret(),

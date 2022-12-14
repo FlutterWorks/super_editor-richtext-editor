@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
+import 'package:super_editor/src/infrastructure/keyboard.dart';
 
 /// Governs document input that comes from a physical keyboard.
 ///
@@ -54,17 +55,6 @@ class DocumentKeyboardInteractor extends StatelessWidget {
       return KeyEventResult.handled;
     }
 
-    // Try to execute an app shortcut for this key combo. If a shortcut
-    // runs, then return that result and skip editor handling. If no shortcut
-    // runs, then try to process this key in the editor.
-    final shortcuts = Shortcuts.maybeOf(node.context!);
-    if (shortcuts != null) {
-      final result = shortcuts.handleKeypress(node.context!, keyEvent);
-      if (result != KeyEventResult.ignored) {
-        return result;
-      }
-    }
-
     editorKeyLog.info("Handling key press: $keyEvent");
     ExecutionInstruction instruction = ExecutionInstruction.continueExecution;
     int index = 0;
@@ -110,29 +100,18 @@ typedef DocumentKeyboardAction = ExecutionInstruction Function({
   required RawKeyEvent keyEvent,
 });
 
-enum ExecutionInstruction {
-  /// The handler has no relation to the key event and
-  /// took no action.
-  ///
-  /// Other handlers should be given a chance to act on
-  /// the key press.
-  continueExecution,
-
-  /// The handler recognized the key event but chose to
-  /// take no action.
-  ///
-  /// No other handler should receive the key event.
-  ///
-  /// The key event **should** bubble up the tree to
-  /// (possibly) be handled by other keyboard/shortcut
-  /// listeners.
-  blocked,
-
-  /// The handler recognized the key event and chose to
-  /// take an action.
-  ///
-  /// No other handler should receive the key event.
-  ///
-  /// The key event **shouldn't** bubble up the tree.
-  haltExecution,
+/// A [DocumentKeyboardAction] that reports [ExecutionInstruction.blocked]
+/// for any key combination that matches one of the given [keys].
+DocumentKeyboardAction ignoreKeyCombos(List<ShortcutActivator> keys) {
+  return ({
+    required EditContext editContext,
+    required RawKeyEvent keyEvent,
+  }) {
+    for (final key in keys) {
+      if (key.accepts(keyEvent, RawKeyboard.instance)) {
+        return ExecutionInstruction.blocked;
+      }
+    }
+    return ExecutionInstruction.continueExecution;
+  };
 }

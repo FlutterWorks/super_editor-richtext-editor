@@ -1,5 +1,4 @@
 import 'package:flutter/widgets.dart';
-import 'package:flutter/rendering.dart';
 
 import 'document_selection.dart';
 import 'document.dart';
@@ -62,15 +61,18 @@ abstract class DocumentLayout {
 
   /// Converts [ancestorOffset] from the [ancestor]'s coordinate space to the
   /// same location on the screen within this [DocumentLayout]'s coordinate space.
-  Offset getDocumentOffsetFromAncestorOffset(Offset ancestorOffset, RenderObject ancestor);
+  Offset getDocumentOffsetFromAncestorOffset(Offset ancestorOffset, [RenderObject? ancestor]);
 
   /// Converts [documentOffset] from this [DocumentLayout]'s coordinate space
   /// to the same location on the screen within the [ancestor]'s coordinate space.
-  Offset getAncestorOffsetFromDocumentOffset(Offset documentOffset, RenderObject ancestor);
+  Offset getAncestorOffsetFromDocumentOffset(Offset documentOffset, [RenderObject? ancestor]);
 
   /// Converts [documentOffset] from this [DocumentLayout]'s coordinate space
   /// to the same location on the screen in the global coordinate space.
   Offset getGlobalOffsetFromDocumentOffset(Offset documentOffset);
+
+  /// Returns the [DocumentPosition] at the end of the last selectable component.
+  DocumentPosition? findLastSelectablePosition();
 }
 
 /// Contract for all widgets that operate as document components
@@ -144,7 +146,7 @@ mixin DocumentComponent<T extends StatefulWidget> on State<T> {
   /// as interpreted by this component/node, in conjunction with
   /// any relevant [movementModifier].
   ///
-  /// The structure and options for [movementModifier]s is
+  /// The structure and options for [movementModifier] is
   /// determined by each component/node combination.
   ///
   /// Returns [null] if the concept of horizontal movement does not
@@ -153,14 +155,14 @@ mixin DocumentComponent<T extends StatefulWidget> on State<T> {
   /// Returns [null] if there is nowhere to move left within this
   /// component, such as when the [currentPosition] is the first
   /// character within a paragraph.
-  NodePosition? movePositionLeft(NodePosition currentPosition, [Set<MovementModifier>? movementModifiers]);
+  NodePosition? movePositionLeft(NodePosition currentPosition, [MovementModifier? movementModifier]);
 
   /// Returns a new position within this component's node that
   /// corresponds to the [currentPosition] moved right one unit,
   /// as interpreted by this component/node, in conjunction with
   /// any relevant [movementModifier].
   ///
-  /// The structure and options for [movementModifier]s is
+  /// The structure and options for [movementModifier] is
   /// determined by each component/node combination.
   ///
   /// Returns null if the concept of horizontal movement does not
@@ -169,7 +171,7 @@ mixin DocumentComponent<T extends StatefulWidget> on State<T> {
   /// Returns null if there is nowhere to move right within this
   /// component, such as when the [currentPosition] refers to the
   /// last character in a paragraph.
-  NodePosition? movePositionRight(NodePosition currentPosition, [Set<MovementModifier>? movementModifiers]);
+  NodePosition? movePositionRight(NodePosition currentPosition, [MovementModifier? movementModifier]);
 
   /// Returns a new position within this component's node that
   /// corresponds to the [currentPosition] moved up one unit,
@@ -270,76 +272,78 @@ mixin DocumentComponent<T extends StatefulWidget> on State<T> {
 /// to provide is [childDocumentComponentKey], which is a `GlobalKey` that provides
 /// access to the child [DocumentComponent].
 mixin ProxyDocumentComponent<T extends StatefulWidget> implements DocumentComponent<T> {
-  DocumentComponent get childDocumentComponentKey;
+  GlobalKey get childDocumentComponentKey;
+
+  DocumentComponent get childDocumentComponent => childDocumentComponentKey.currentState as DocumentComponent;
 
   @override
   NodePosition? getPositionAtOffset(Offset localOffset) {
-    return childDocumentComponentKey.getPositionAtOffset(localOffset);
+    return childDocumentComponent.getPositionAtOffset(localOffset);
   }
 
   @override
   Offset getOffsetForPosition(NodePosition nodePosition) {
-    return childDocumentComponentKey.getOffsetForPosition(nodePosition);
+    return childDocumentComponent.getOffsetForPosition(nodePosition);
   }
 
   @override
   Rect getRectForPosition(NodePosition nodePosition) {
-    return childDocumentComponentKey.getRectForPosition(nodePosition);
+    return childDocumentComponent.getRectForPosition(nodePosition);
   }
 
   @override
   Rect getRectForSelection(NodePosition baseNodePosition, NodePosition extentNodePosition) {
-    return childDocumentComponentKey.getRectForSelection(baseNodePosition, extentNodePosition);
+    return childDocumentComponent.getRectForSelection(baseNodePosition, extentNodePosition);
   }
 
   @override
   NodePosition getBeginningPosition() {
-    return childDocumentComponentKey.getBeginningPosition();
+    return childDocumentComponent.getBeginningPosition();
   }
 
   @override
   NodePosition getBeginningPositionNearX(double x) {
-    return childDocumentComponentKey.getBeginningPositionNearX(x);
+    return childDocumentComponent.getBeginningPositionNearX(x);
   }
 
   @override
-  NodePosition? movePositionLeft(NodePosition currentPosition, [Set<MovementModifier>? movementModifiers]) {
-    return childDocumentComponentKey.movePositionLeft(currentPosition, movementModifiers);
+  NodePosition? movePositionLeft(NodePosition currentPosition, [MovementModifier? movementModifier]) {
+    return childDocumentComponent.movePositionLeft(currentPosition, movementModifier);
   }
 
   @override
-  NodePosition? movePositionRight(NodePosition currentPosition, [Set<MovementModifier>? movementModifiers]) {
-    return childDocumentComponentKey.movePositionRight(currentPosition, movementModifiers);
+  NodePosition? movePositionRight(NodePosition currentPosition, [MovementModifier? movementModifier]) {
+    return childDocumentComponent.movePositionRight(currentPosition, movementModifier);
   }
 
   @override
   NodePosition? movePositionUp(NodePosition currentPosition) {
-    return childDocumentComponentKey.movePositionUp(currentPosition);
+    return childDocumentComponent.movePositionUp(currentPosition);
   }
 
   @override
   NodePosition? movePositionDown(NodePosition currentPosition) {
-    return childDocumentComponentKey.movePositionDown(currentPosition);
+    return childDocumentComponent.movePositionDown(currentPosition);
   }
 
   @override
   NodePosition getEndPosition() {
-    return childDocumentComponentKey.getEndPosition();
+    return childDocumentComponent.getEndPosition();
   }
 
   @override
   NodePosition getEndPositionNearX(double x) {
-    return childDocumentComponentKey.getEndPositionNearX(x);
+    return childDocumentComponent.getEndPositionNearX(x);
   }
 
   @override
   NodeSelection? getSelectionInRange(Offset localBaseOffset, Offset localExtentOffset) {
-    return childDocumentComponentKey.getSelectionInRange(localBaseOffset, localExtentOffset);
+    return childDocumentComponent.getSelectionInRange(localBaseOffset, localExtentOffset);
   }
 
   @override
   NodeSelection getCollapsedSelectionAt(NodePosition nodePosition) {
-    return childDocumentComponentKey.getCollapsedSelectionAt(nodePosition);
+    return childDocumentComponent.getCollapsedSelectionAt(nodePosition);
   }
 
   @override
@@ -347,20 +351,20 @@ mixin ProxyDocumentComponent<T extends StatefulWidget> implements DocumentCompon
     required NodePosition basePosition,
     required NodePosition extentPosition,
   }) {
-    return childDocumentComponentKey.getSelectionBetween(basePosition: basePosition, extentPosition: extentPosition);
+    return childDocumentComponent.getSelectionBetween(basePosition: basePosition, extentPosition: extentPosition);
   }
 
   @override
   NodeSelection getSelectionOfEverything() {
-    return childDocumentComponentKey.getSelectionOfEverything();
+    return childDocumentComponent.getSelectionOfEverything();
   }
 
   @override
-  bool isVisualSelectionSupported() => childDocumentComponentKey.isVisualSelectionSupported();
+  bool isVisualSelectionSupported() => childDocumentComponent.isVisualSelectionSupported();
 
   @override
   MouseCursor? getDesiredCursorAtOffset(Offset localOffset) {
-    return childDocumentComponentKey.getDesiredCursorAtOffset(localOffset);
+    return childDocumentComponent.getDesiredCursorAtOffset(localOffset);
   }
 }
 
@@ -401,62 +405,12 @@ class MovementModifier {
   final String id;
 
   @override
+  String toString() => id;
+
+  @override
   bool operator ==(Object other) =>
       identical(this, other) || other is MovementModifier && runtimeType == other.runtimeType && id == other.id;
 
   @override
   int get hashCode => id.hashCode;
-}
-
-/// Information that is provided to a [ComponentBuilder] to
-/// construct an appropriate [DocumentComponent] widget.
-class ComponentContext {
-  /// Creates a component context.
-  const ComponentContext({
-    required this.context,
-    required this.document,
-    this.documentSelection,
-    required this.documentNode,
-    required this.componentKey,
-    required this.showCaret,
-    this.nodeSelection,
-    this.extensions = const {},
-  });
-
-  /// The [BuildContext] for the parent of the [DocumentComponent]
-  /// that needs to be built.
-  final BuildContext context;
-
-  /// The [Document] that contains the [DocumentNode].
-  final Document document;
-
-  /// The current user selection in the [document].
-  final DocumentSelection? documentSelection;
-
-  /// The [DocumentNode] for which a component is needed.
-  final DocumentNode documentNode;
-
-  /// A [GlobalKey] that must be assigned to the [DocumentComponent]
-  /// widget returned by a [ComponentBuilder].
-  ///
-  /// The [componentKey] is used by the [DocumentLayout] to query for
-  /// node-specific information, like node positions and selections.
-  final GlobalKey componentKey;
-
-  /// [true] if the extent component should display a caret,
-  /// [false] otherwise.
-  ///
-  /// Not every component has a caret to display, e.g., an
-  /// image, but the components that do have a caret, e.g.,
-  /// a paragraph, should respect this property.
-  final bool showCaret;
-
-  /// The current selected region within the [documentNode].
-  ///
-  /// The component should paint this selection.
-  final DocumentNodeSelection? nodeSelection;
-
-  /// May contain additional information needed to build the
-  /// component, based on the specific type of the [documentNode].
-  final Map<String, dynamic> extensions;
 }

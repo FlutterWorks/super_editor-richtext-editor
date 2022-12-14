@@ -1,77 +1,109 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
 import 'package:super_editor/super_editor.dart';
+import 'package:super_editor/super_editor_test.dart';
 
-import 'test_documents.dart';
-
+import '../../super_editor/document_test_tools.dart';
 
 void main() {
   group('SuperEditor', () {
-    group('autofocus tests -', () {
-      testWidgets('does not claim focus when autofocus = false', (tester) async {
-        final focusNode = FocusNode();
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: SuperEditor(
-                editor: DocumentEditor(document: singleBlockDoc()),
-                focusNode: focusNode,
-                inputSource: _inputAndGestureVariants.currentValue!.inputSource,
-                gestureMode: _inputAndGestureVariants.currentValue!.gestureMode,
-                autofocus: false,
-              ),
-            ),
-          ),
-        );
+    group('autofocus', () {
+      testWidgets('does not claim focus when autofocus is false', (tester) async {
+        // Configure and render a document.
+        await tester //
+            .createDocument()
+            .withSingleParagraph()
+            .withInputSource(_inputAndGestureVariants.currentValue!.inputSource)
+            .withGestureMode(_inputAndGestureVariants.currentValue!.gestureMode)
+            .autoFocus(false)
+            .pump();
 
-        expect(focusNode.hasFocus, false);
+        expect(SuperEditorInspector.hasFocus(), false);
       }, variant: _inputAndGestureVariants);
 
-      testWidgets('claims focus when autofocus = true - ', (tester) async {
-        final focusNode = FocusNode();
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: SuperEditor(
-                editor: DocumentEditor(document: singleBlockDoc()),
-                focusNode: focusNode,
-                inputSource: _inputAndGestureVariants.currentValue!.inputSource,
-                gestureMode: _inputAndGestureVariants.currentValue!.gestureMode,
-                autofocus: true,
-              ),
-            ),
-          ),
-        );
+      testWidgets('claims focus when autofocus is true', (tester) async {
+        // Configure and render a document.
+        await tester //
+            .createDocument()
+            .withSingleParagraph()
+            .withInputSource(_inputAndGestureVariants.currentValue!.inputSource)
+            .withGestureMode(_inputAndGestureVariants.currentValue!.gestureMode)
+            .autoFocus(true)
+            .pump();
 
-        expect(focusNode.hasFocus, true);
+        expect(SuperEditorInspector.hasFocus(), true);
       }, variant: _inputAndGestureVariants);
 
-      testWidgets('claims focus by gesture when autofocus = false -', (tester) async {
-        final focusNode = FocusNode();
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: SuperEditor(
-                editor: DocumentEditor(document: singleBlockDoc()),
-                focusNode: focusNode,
-                inputSource: _inputAndGestureVariants.currentValue!.inputSource,
-                gestureMode: _inputAndGestureVariants.currentValue!.gestureMode,
-                autofocus: false,
-              ),
-            ),
-          ),
-        );
+      testWidgets('claims focus by gesture when autofocus is false', (tester) async {
+        // Configure and render a document.
+        await tester //
+            .createDocument()
+            .withSingleParagraph()
+            .withInputSource(_inputAndGestureVariants.currentValue!.inputSource)
+            .withGestureMode(_inputAndGestureVariants.currentValue!.gestureMode)
+            .autoFocus(false)
+            .pump();
 
-        await tester.tap(find.byType(SuperEditor));
-        await tester.pumpAndSettle();
+        await tester.placeCaretInParagraph("1", 0);
 
-        expect(focusNode.hasFocus, true);
+        expect(SuperEditorInspector.hasFocus(), true);
       }, variant: _inputAndGestureVariants);
+    });
+
+    group("stylesheet", () {
+      testWidgets("change causes presentation to run again", (tester) async {
+        // Configure and render a document.
+        final testDocument = await tester //
+            .createDocument()
+            .withSingleParagraph()
+            .useStylesheet(_stylesheet1)
+            .pump();
+
+        // Ensure that the initial text is black
+        expect(SuperEditorInspector.findParagraphStyle("1")!.color, Colors.black);
+
+        // Configure and render a document with a different stylesheet.
+        await tester //
+            .updateDocument(testDocument)
+            .useStylesheet(_stylesheet2)
+            .pump();
+
+        // Expect the paragraph to now be white.
+        expect(SuperEditorInspector.findParagraphStyle("1")!.color, Colors.white);
+      });
     });
   });
 }
 
+final _stylesheet1 = Stylesheet(
+  inlineTextStyler: inlineTextStyler,
+  rules: [
+    StyleRule(BlockSelector.all, (document, node) {
+      return {
+        "textStyle": const TextStyle(
+          color: Colors.black,
+        ),
+      };
+    }),
+  ],
+);
+
+final _stylesheet2 = Stylesheet(
+  inlineTextStyler: inlineTextStyler,
+  rules: [
+    StyleRule(BlockSelector.all, (document, node) {
+      return {
+        "textStyle": const TextStyle(
+          color: Colors.white,
+        ),
+      };
+    }),
+  ],
+);
+
+TextStyle inlineTextStyler(Set<Attribution> attributions, TextStyle base) {
+  return base;
+}
 
 class _InputAndGestureTuple {
   final DocumentInputSource inputSource;

@@ -1,21 +1,24 @@
 import 'package:example/demos/components/demo_text_with_hint.dart';
 import 'package:example/demos/components/demo_unselectable_hr.dart';
+import 'package:example/demos/debugging/simple_deltas_input.dart';
 import 'package:example/demos/demo_app_shortcuts.dart';
-import 'package:example/demos/demo_rtl.dart';
+import 'package:example/demos/demo_empty_document.dart';
 import 'package:example/demos/demo_markdown_serialization.dart';
 import 'package:example/demos/demo_paragraphs.dart';
+import 'package:example/demos/demo_rtl.dart';
 import 'package:example/demos/demo_selectable_text.dart';
 import 'package:example/demos/editor_configs/demo_mobile_editing_android.dart';
 import 'package:example/demos/editor_configs/demo_mobile_editing_ios.dart';
 import 'package:example/demos/example_editor/example_editor.dart';
 import 'package:example/demos/flutter_features/demo_inline_widgets.dart';
 import 'package:example/demos/flutter_features/textinputclient/basic_text_input_client.dart';
-import 'package:example/demos/scrolling/demo_task_and_chat_with_customscrollview.dart';
-import 'package:example/demos/styles/demo_doc_styles.dart';
-import 'package:example/demos/supertextfield/ios/demo_superiostextfield.dart';
 import 'package:example/demos/flutter_features/textinputclient/textfield.dart';
+import 'package:example/demos/scrolling/demo_task_and_chat_with_customscrollview.dart';
 import 'package:example/demos/sliver_example_editor.dart';
+import 'package:example/demos/styles/demo_doc_styles.dart';
+import 'package:example/demos/super_document/demo_super_reader.dart';
 import 'package:example/demos/supertextfield/demo_textfield.dart';
+import 'package:example/demos/supertextfield/ios/demo_superiostextfield.dart';
 import 'package:example/logging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
@@ -26,20 +29,22 @@ import 'package:super_editor/super_editor.dart';
 import 'demos/demo_attributed_text.dart';
 import 'demos/demo_document_loses_focus.dart';
 import 'demos/demo_switch_document_content.dart';
-import 'demos/scrolling/demo_task_and_chat_with_renderobject.dart';
 import 'demos/super_document/demo_read_only_scrolling_document.dart';
 import 'demos/supertextfield/android/demo_superandroidtextfield.dart';
 
 /// Demo of a basic text editor, as well as various widgets that
 /// are available in this package.
 Future<void> main() async {
-  initLoggers(Level.FINE, {
-    editorGesturesLog,
-    editorImeLog,
-    editorKeyLog,
-    editorOpsLog,
-    editorLayoutLog,
-    editorDocLog,
+  initLoggers(Level.FINEST, {
+    // editorScrollingLog,
+    // editorGesturesLog,
+    // editorImeLog,
+    // editorKeyLog,
+    // editorOpsLog,
+    // editorLayoutLog,
+    // editorDocLog,
+    // editorStyleLog,
+    // textFieldLog,
     appLog,
   });
 
@@ -112,24 +117,49 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      appBar: _buildAppBar(context),
-      extendBodyBehindAppBar: true,
-      body: _selectedMenuItem!.pageBuilder(context),
-      drawer: _buildDrawer(),
+    // We need a FocusScope above the Overlay so that focus can be shared between
+    // SuperEditor in one OverlayEntry, and the popover toolbar in another OverlayEntry.
+    return FocusScope(
+      // We need our own [Overlay] instead of the one created by the navigator
+      // because overlay entries added to navigator's [Overlay] are always
+      // displayed above all routes.
+      //
+      // We display the editor's toolbar in an [OverlayEntry], so inserting it
+      // at the navigator's [Overlay] causes widgets that are displayed in routes,
+      // e.g. [DropdownButton] items, to be displayed beneath the toolbar.
+      child: Overlay(
+        initialEntries: [
+          OverlayEntry(builder: (context) {
+            return Scaffold(
+              key: _scaffoldKey,
+              body: Stack(
+                children: [
+                  _selectedMenuItem!.pageBuilder(context),
+                  _buildDrawerButton(),
+                ],
+              ),
+              drawer: _buildDrawer(),
+            );
+          })
+        ],
+      ),
     );
   }
 
-  PreferredSizeWidget _buildAppBar(BuildContext context) {
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.menu),
-        color: Theme.of(context).colorScheme.onSurface,
-        splashRadius: 24,
-        onPressed: _toggleDrawer,
+  Widget _buildDrawerButton() {
+    return SafeArea(
+      child: Material(
+        color: Colors.transparent,
+        child: SizedBox(
+          height: 56,
+          width: 56,
+          child: IconButton(
+            icon: const Icon(Icons.menu),
+            color: Theme.of(context).colorScheme.onSurface,
+            splashRadius: 24,
+            onPressed: _toggleDrawer,
+          ),
+        ),
       ),
     );
   }
@@ -137,6 +167,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildDrawer() {
     return Drawer(
       child: SingleChildScrollView(
+        primary: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
           child: Column(
@@ -218,6 +249,13 @@ final _menu = <_MenuGroup>[
           return RTLDemo();
         },
       ),
+      _MenuItem(
+        icon: Icons.description,
+        title: 'Empty Document',
+        pageBuilder: (context) {
+          return EmptyDocumentDemo();
+        },
+      ),
     ],
   ),
   _MenuGroup(
@@ -256,6 +294,13 @@ final _menu = <_MenuGroup>[
     items: [
       _MenuItem(
         icon: Icons.text_snippet,
+        title: 'SuperReader',
+        pageBuilder: (context) {
+          return SuperReaderDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.text_snippet,
         title: 'In CustomScrollView',
         pageBuilder: (context) {
           return ReadOnlyCustomScrollViewDemo();
@@ -266,13 +311,6 @@ final _menu = <_MenuGroup>[
   _MenuGroup(
     title: 'SCROLLING',
     items: [
-      _MenuItem(
-        icon: Icons.task,
-        title: 'Task and Chat Demo - RenderBox',
-        pageBuilder: (context) {
-          return TaskAndChatWithRenderObjectDemo();
-        },
-      ),
       _MenuItem(
         icon: Icons.task,
         title: 'Task and Chat Demo - Slivers',
@@ -344,7 +382,7 @@ final _menu = <_MenuGroup>[
     items: [
       _MenuItem(
         icon: Icons.text_fields,
-        title: 'SuperSelectableText',
+        title: 'SuperTextWithSelection',
         pageBuilder: (context) {
           return SelectableTextDemo();
         },
@@ -354,6 +392,18 @@ final _menu = <_MenuGroup>[
         title: 'Attributed Text',
         pageBuilder: (context) {
           return AttributedTextDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
+    title: 'DEBUGGING',
+    items: [
+      _MenuItem(
+        icon: Icons.text_fields,
+        title: 'Text Deltas',
+        pageBuilder: (context) {
+          return SimpleDeltasInputDemo();
         },
       ),
     ],

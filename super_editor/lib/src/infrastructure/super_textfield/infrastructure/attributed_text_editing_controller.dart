@@ -4,9 +4,11 @@ import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:super_editor/src/core/document_layout.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_editor/src/infrastructure/strings.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 class AttributedTextEditingController with ChangeNotifier {
   AttributedTextEditingController({
@@ -91,7 +93,7 @@ class AttributedTextEditingController with ChangeNotifier {
 
   /// Removes the given [attributions] from [composingAttributions].
   void removeComposingAttributions(Set<Attribution> attributions) {
-    _composingAttributions.removeWhere((attribution) => _composingAttributions.contains(attribution));
+    _composingAttributions.removeWhere((attribution) => attributions.contains(attribution));
     notifyListeners();
   }
 
@@ -577,8 +579,11 @@ class AttributedTextEditingController with ChangeNotifier {
     final updatedSelection =
         newSelection ?? _moveSelectionForDeletion(selection: _selection, deleteFrom: from, deleteTo: to);
 
-    text = updatedText;
-    selection = updatedSelection;
+    updateTextAndSelection(
+      text: updatedText,
+      selection: updatedSelection,
+    );
+    
     _updateComposingAttributions();
     // TODO: do we need to implement composing region update behavior like selections?
     composingRegion = newComposingRegion ?? TextRange.empty;
@@ -645,9 +650,8 @@ class AttributedTextEditingController with ChangeNotifier {
     _composingAttributions.clear();
     _composingRegion = TextRange.empty;
   }
-}
 
-extension DefaultSuperTextFieldActions on AttributedTextEditingController {
+  //------ START: Methods moved here from extension methods ---------
   void copySelectedTextToClipboard() {
     if (selection.extentOffset == -1) {
       // Nothing selected to copy.
@@ -685,84 +689,142 @@ extension DefaultSuperTextFieldActions on AttributedTextEditingController {
   }
 
   void moveCaretHorizontally({
-    required SuperSelectableTextState selectableTextState,
+    required ProseTextLayout textLayout,
     required bool expandSelection,
     required bool moveLeft,
-    Map<String, dynamic> movementModifiers = const {},
+    required MovementModifier? movementModifier,
   }) {
-    int newExtent;
-
     if (moveLeft) {
-      if (selection.extentOffset <= 0 && selection.isCollapsed) {
-        // Can't move further left.
-        return;
-      }
-
-      if (!selection.isCollapsed && !expandSelection) {
-        // The selection isn't collapsed and the user doesn't
-        // want to continue expanding the selection. Move the
-        // extent to the left side of the selection.
-        newExtent = selection.start;
-      } else if (movementModifiers['movement_unit'] == 'line') {
-        newExtent = selectableTextState.getPositionAtStartOfLine(TextPosition(offset: selection.extentOffset)).offset;
-      } else if (movementModifiers['movement_unit'] == 'word') {
-        final plainText = text.text;
-
-        newExtent = selection.extentOffset;
-        newExtent -= 1; // we always want to jump at least 1 character.
-        while (newExtent > 0 && plainText[newExtent - 1] != ' ' && plainText[newExtent - 1] != '\n') {
-          newExtent -= 1;
-        }
-      } else {
-        newExtent = max(selection.extentOffset - 1, 0);
-      }
+      _moveCaretUpstream(
+        textLayout: textLayout,
+        expandSelection: expandSelection,
+        movementModifier: movementModifier,
+      );
     } else {
-      if (selection.extentOffset >= text.text.length && selection.isCollapsed) {
-        // Can't move further right.
-        return;
-      }
+      _moveCaretDownstream(
+        textLayout: textLayout,
+        expandSelection: expandSelection,
+        movementModifier: movementModifier,
+      );
+    }
+  }
 
-      if (!selection.isCollapsed && !expandSelection) {
-        // The selection isn't collapsed and the user doesn't
-        // want to continue expanding the selection. Move the
-        // extent to the left side of the selection.
-        newExtent = selection.end;
-      } else if (movementModifiers['movement_unit'] == 'line') {
-        final endOfLine = selectableTextState.getPositionAtEndOfLine(TextPosition(offset: selection.extentOffset));
-
-        final endPosition = TextPosition(offset: text.text.length);
-        final plainText = text.text;
-
-        // Note: we compare offset values because we don't care if the affinitys are equal
-        final isAutoWrapLine = endOfLine.offset != endPosition.offset && (plainText[endOfLine.offset] != '\n');
-
-        // Note: For lines that auto-wrap, moving the cursor to `offset` causes the
-        //       cursor to jump to the next line because the cursor is placed after
-        //       the final selected character. We don't want this, so in this case
-        //       we `-1`.
-        //
-        //       However, if the line that is selected ends with an explicit `\n`,
-        //       or if the line is the terminal line for the paragraph then we don't
-        //       want to `-1` because that would leave a dangling character after the
-        //       selection.
-        // TODO: this is the concept of text affinity. Implement support for affinity.
-        // TODO: with affinity, ensure it works as expected for right-aligned text
-        // TODO: this logic fails for justified text - find a solution for that (#55)
-        newExtent = isAutoWrapLine ? endOfLine.offset - 1 : endOfLine.offset;
-      } else if (movementModifiers['movement_unit'] == 'word') {
-        final extentPosition = selection.extent;
-        final plainText = text.text;
-
-        newExtent = extentPosition.offset;
-        newExtent += 1; // we always want to jump at least 1 character.
-        while (newExtent < plainText.length && plainText[newExtent] != ' ' && plainText[newExtent] != '\n') {
-          newExtent += 1;
-        }
-      } else {
-        newExtent = min(selection.extentOffset + 1, text.text.length);
-      }
+  void _moveCaretUpstream({
+    required ProseTextLayout textLayout,
+    required bool expandSelection,
+    required MovementModifier? movementModifier,
+  }) {
+    if (!selection.isCollapsed && !expandSelection) {
+      // The selection isn't collapsed and the user doesn't
+      // want to continue expanding the selection. Move the
+      // extent to the left side of the selection.
+      selection = TextSelection.collapsed(offset: selection.start);
+      return;
     }
 
+    if (selection.extentOffset <= 0) {
+      // Can't move further left.
+      return;
+    }
+
+    if (movementModifier == MovementModifier.line) {
+      final newExtent = textLayout.getPositionAtStartOfLine(TextPosition(offset: selection.extentOffset)).offset;
+      selection = TextSelection(
+        baseOffset: expandSelection ? selection.baseOffset : newExtent,
+        extentOffset: newExtent,
+      );
+      return;
+    }
+
+    if (movementModifier == MovementModifier.word) {
+      final plainText = text.text;
+
+      int newExtent = selection.extentOffset;
+      newExtent -= 1; // we always want to jump at least 1 character.
+      while (newExtent > 0 && plainText[newExtent - 1] != ' ' && plainText[newExtent - 1] != '\n') {
+        newExtent -= 1;
+      }
+
+      selection = TextSelection(
+        baseOffset: expandSelection ? selection.baseOffset : newExtent,
+        extentOffset: newExtent,
+      );
+      return;
+    }
+
+    final newExtent = text.text.moveOffsetUpstreamByCharacter(selection.extentOffset) ?? 0;
+    selection = TextSelection(
+      baseOffset: expandSelection ? selection.baseOffset : newExtent,
+      extentOffset: newExtent,
+    );
+  }
+
+  void _moveCaretDownstream({
+    required ProseTextLayout textLayout,
+    required bool expandSelection,
+    required MovementModifier? movementModifier,
+  }) {
+    if (!selection.isCollapsed && !expandSelection) {
+      // The selection isn't collapsed and the user doesn't
+      // want to continue expanding the selection. Move the
+      // extent to the right side of the selection.
+      selection = TextSelection.collapsed(offset: selection.end);
+      return;
+    }
+
+    if (selection.extentOffset >= text.text.length) {
+      // Can't move further right.
+      return;
+    }
+
+    if (movementModifier == MovementModifier.line) {
+      final endOfLine = textLayout.getPositionAtEndOfLine(TextPosition(offset: selection.extentOffset));
+
+      final endPosition = TextPosition(offset: text.text.length);
+      final plainText = text.text;
+
+      // Note: we compare offset values because we don't care if the affinitys are equal
+      final isAutoWrapLine = endOfLine.offset != endPosition.offset && (plainText[endOfLine.offset] != '\n');
+
+      // Note: For lines that auto-wrap, moving the cursor to `offset` causes the
+      //       cursor to jump to the next line because the cursor is placed after
+      //       the final selected character. We don't want this, so in this case
+      //       we `-1`.
+      //
+      //       However, if the line that is selected ends with an explicit `\n`,
+      //       or if the line is the terminal line for the paragraph then we don't
+      //       want to `-1` because that would leave a dangling character after the
+      //       selection.
+      // TODO: this is the concept of text affinity. Implement support for affinity.
+      // TODO: with affinity, ensure it works as expected for right-aligned text
+      // TODO: this logic fails for justified text - find a solution for that (#55)
+      final newExtent = isAutoWrapLine ? endOfLine.offset - 1 : endOfLine.offset;
+
+      selection = TextSelection(
+        baseOffset: expandSelection ? selection.baseOffset : newExtent,
+        extentOffset: newExtent,
+      );
+      return;
+    }
+
+    if (movementModifier == MovementModifier.word) {
+      final extentPosition = selection.extent;
+      final plainText = text.text;
+
+      int newExtent = extentPosition.offset;
+      newExtent += 1; // we always want to jump at least 1 character.
+      while (newExtent < plainText.length && plainText[newExtent] != ' ' && plainText[newExtent] != '\n') {
+        newExtent += 1;
+      }
+
+      selection = TextSelection(
+        baseOffset: expandSelection ? selection.baseOffset : newExtent,
+        extentOffset: newExtent,
+      );
+      return;
+    }
+
+    final newExtent = text.text.moveOffsetDownstreamByCharacter(selection.extentOffset) ?? text.text.length;
     selection = TextSelection(
       baseOffset: expandSelection ? selection.baseOffset : newExtent,
       extentOffset: newExtent,
@@ -770,20 +832,20 @@ extension DefaultSuperTextFieldActions on AttributedTextEditingController {
   }
 
   void moveCaretVertically({
-    required SuperSelectableTextState selectableTextState,
+    required ProseTextLayout textLayout,
     required bool expandSelection,
     required bool moveUp,
   }) {
     int? newExtent;
 
     if (moveUp) {
-      newExtent = selectableTextState.getPositionOneLineUp(selection.extent)?.offset;
+      newExtent = textLayout.getPositionOneLineUp(selection.extent)?.offset;
 
       // If there is no line above the current selection, move selection
       // to the beginning of the available text.
       newExtent ??= 0;
     } else {
-      newExtent = selectableTextState.getPositionOneLineDown(selection.extent)?.offset;
+      newExtent = textLayout.getPositionOneLineDown(selection.extent)?.offset;
 
       // If there is no line below the current selection, move selection
       // to the end of the available text.
@@ -839,11 +901,11 @@ extension DefaultSuperTextFieldActions on AttributedTextEditingController {
   }
 
   void deleteTextOnLineBeforeCaret({
-    required SuperSelectableTextState selectableTextState,
+    required ProseTextLayout textLayout,
   }) {
     assert(selection.isCollapsed);
 
-    final startOfLinePosition = selectableTextState.getPositionAtStartOfLine(selection.extent);
+    final startOfLinePosition = textLayout.getPositionAtStartOfLine(selection.extent);
     selection = TextSelection(
       baseOffset: selection.extentOffset,
       extentOffset: startOfLinePosition.offset,
@@ -876,4 +938,5 @@ extension DefaultSuperTextFieldActions on AttributedTextEditingController {
     );
     selection = TextSelection.collapsed(offset: currentSelectionExtent.offset + 1);
   }
+  //------ END: Methods moved here from extension methods -------
 }

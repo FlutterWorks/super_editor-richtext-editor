@@ -14,22 +14,22 @@ void main() {
         ]);
 
         (doc.nodes[0] as ParagraphNode).putMetadataValue('blockType', header1Attribution);
-        expect(serializeDocumentToMarkdown(doc).trim(), '# My Header');
+        expect(serializeDocumentToMarkdown(doc), '# My Header');
 
         (doc.nodes[0] as ParagraphNode).putMetadataValue('blockType', header2Attribution);
-        expect(serializeDocumentToMarkdown(doc).trim(), '## My Header');
+        expect(serializeDocumentToMarkdown(doc), '## My Header');
 
         (doc.nodes[0] as ParagraphNode).putMetadataValue('blockType', header3Attribution);
-        expect(serializeDocumentToMarkdown(doc).trim(), '### My Header');
+        expect(serializeDocumentToMarkdown(doc), '### My Header');
 
         (doc.nodes[0] as ParagraphNode).putMetadataValue('blockType', header4Attribution);
-        expect(serializeDocumentToMarkdown(doc).trim(), '#### My Header');
+        expect(serializeDocumentToMarkdown(doc), '#### My Header');
 
         (doc.nodes[0] as ParagraphNode).putMetadataValue('blockType', header5Attribution);
-        expect(serializeDocumentToMarkdown(doc).trim(), '##### My Header');
+        expect(serializeDocumentToMarkdown(doc), '##### My Header');
 
         (doc.nodes[0] as ParagraphNode).putMetadataValue('blockType', header6Attribution);
-        expect(serializeDocumentToMarkdown(doc).trim(), '###### My Header');
+        expect(serializeDocumentToMarkdown(doc), '###### My Header');
       });
 
       test('header with styles', () {
@@ -49,7 +49,7 @@ void main() {
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '# My **Header**');
+        expect(serializeDocumentToMarkdown(doc), '# My **Header**');
       });
 
       test('blockquote', () {
@@ -61,7 +61,7 @@ void main() {
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '> This is a blockquote');
+        expect(serializeDocumentToMarkdown(doc), '> This is a blockquote');
       });
 
       test('blockquote with styles', () {
@@ -81,7 +81,7 @@ void main() {
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '> This is a **blockquote**');
+        expect(serializeDocumentToMarkdown(doc), '> This is a **blockquote**');
       });
 
       test('code', () {
@@ -94,12 +94,12 @@ void main() {
         ]);
 
         expect(
-            serializeDocumentToMarkdown(doc).trim(),
-            '''
+          serializeDocumentToMarkdown(doc),
+          '''
 ```
 This is some code
-```'''
-                .trim());
+```''',
+        );
       });
 
       test('paragraph', () {
@@ -110,7 +110,7 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), 'This is a paragraph.');
+        expect(serializeDocumentToMarkdown(doc), 'This is a paragraph.');
       });
 
       test('paragraph with one inline style', () {
@@ -129,7 +129,7 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), 'This **is a** paragraph.');
+        expect(serializeDocumentToMarkdown(doc), 'This **is a** paragraph.');
       });
 
       test('paragraph with overlapping bold and italics', () {
@@ -150,7 +150,49 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), 'This ***is a*** paragraph.');
+        expect(serializeDocumentToMarkdown(doc), 'This ***is a*** paragraph.');
+      });
+
+      test('paragraph with non-overlapping bold and italics', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  const SpanMarker(attribution: boldAttribution, offset: 0, markerType: SpanMarkerType.start),
+                  const SpanMarker(attribution: boldAttribution, offset: 6, markerType: SpanMarkerType.end),
+                  const SpanMarker(attribution: italicsAttribution, offset: 8, markerType: SpanMarkerType.start),
+                  const SpanMarker(attribution: italicsAttribution, offset: 19, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), '**This is** *a paragraph.*');
+      });
+
+      test('paragraph with intersecting bold and italics', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  const SpanMarker(attribution: boldAttribution, offset: 5, markerType: SpanMarkerType.start),
+                  const SpanMarker(attribution: boldAttribution, offset: 8, markerType: SpanMarkerType.end),
+                  const SpanMarker(attribution: italicsAttribution, offset: 5, markerType: SpanMarkerType.start),
+                  const SpanMarker(attribution: italicsAttribution, offset: 18, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), 'This ***is a** paragraph*.');
       });
 
       test('paragraph with overlapping code and bold', () {
@@ -171,7 +213,281 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), 'This `**is a**` paragraph.');
+        expect(serializeDocumentToMarkdown(doc), 'This `**is a**` paragraph.');
+      });
+
+      test('paragraph with link', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  SpanMarker(
+                      attribution: LinkAttribution(url: Uri.https('example.org', '')),
+                      offset: 10,
+                      markerType: SpanMarkerType.start),
+                  SpanMarker(
+                      attribution: LinkAttribution(url: Uri.https('example.org', '')),
+                      offset: 18,
+                      markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), 'This is a [paragraph](https://example.org).');
+      });
+
+      test('paragraph with link overlapping style', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  SpanMarker(
+                      attribution: LinkAttribution(url: Uri.https('example.org', '')),
+                      offset: 10,
+                      markerType: SpanMarkerType.start),
+                  SpanMarker(
+                      attribution: LinkAttribution(url: Uri.https('example.org', '')),
+                      offset: 18,
+                      markerType: SpanMarkerType.end),
+                  const SpanMarker(attribution: boldAttribution, offset: 10, markerType: SpanMarkerType.start),
+                  const SpanMarker(attribution: boldAttribution, offset: 18, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), 'This is a [**paragraph**](https://example.org).');
+      });
+
+      test('paragraph with link intersecting style', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  SpanMarker(
+                      attribution: LinkAttribution(url: Uri.https('example.org', '')),
+                      offset: 0,
+                      markerType: SpanMarkerType.start),
+                  SpanMarker(
+                      attribution: LinkAttribution(url: Uri.https('example.org', '')),
+                      offset: 18,
+                      markerType: SpanMarkerType.end),
+                  const SpanMarker(attribution: boldAttribution, offset: 5, markerType: SpanMarkerType.start),
+                  const SpanMarker(attribution: boldAttribution, offset: 8, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), '[This **is a** paragraph](https://example.org).');
+      });
+
+      test('paragraph with underline', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  SpanMarker(attribution: underlineAttribution, offset: 10, markerType: SpanMarkerType.start),
+                  SpanMarker(attribution: underlineAttribution, offset: 18, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), 'This is a ¬paragraph¬.');
+      });
+
+      test('paragraph with strikethrough', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'This is a paragraph.',
+              spans: AttributedSpans(
+                attributions: [
+                  SpanMarker(attribution: strikethroughAttribution, offset: 10, markerType: SpanMarkerType.start),
+                  SpanMarker(attribution: strikethroughAttribution, offset: 18, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), 'This is a ~paragraph~.');
+      });
+
+      test('paragraph with consecutive links', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(
+              text: 'First LinkSecond Link',
+              spans: AttributedSpans(
+                attributions: [
+                  SpanMarker(attribution: LinkAttribution(url: Uri.https('example.org', '')), offset: 0, markerType: SpanMarkerType.start),
+                  SpanMarker(attribution: LinkAttribution(url: Uri.https('example.org', '')), offset: 9, markerType: SpanMarkerType.end),
+                  SpanMarker(attribution: LinkAttribution(url: Uri.https('github.com', '')), offset: 10, markerType: SpanMarkerType.start),
+                  SpanMarker(attribution: LinkAttribution(url: Uri.https('github.com', '')), offset: 20, markerType: SpanMarkerType.end),
+                ],
+              ),
+            ),
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), '[First Link](https://example.org)[Second Link](https://github.com)');
+      });
+
+      test('paragraph with left alignment', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(text: 'Paragraph1'),
+            metadata: {
+              'textAlign': 'left',
+            },
+          ),
+        ]);
+
+        // Even when using superEditor markdown syntax, which has support
+        // for text alignment, we don't add an alignment token when
+        // the paragraph is left-aligned.
+        // Paragraphs are left-aligned by default, so it isn't necessary
+        // to serialize the alignment token.
+        expect(serializeDocumentToMarkdown(doc), 'Paragraph1');
+      });
+
+      test('paragraph with center alignment', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(text: 'Paragraph1'),
+            metadata: {
+              'textAlign': 'center',
+            },
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), ':---:\nParagraph1');
+      });
+
+      test('paragraph with right alignment', () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(text: 'Paragraph1'),
+            metadata: {
+              'textAlign': 'right',
+            },
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), '---:\nParagraph1');
+      });
+
+      test("doesn't serialize text alignment when not using supereditor syntax", () {
+        final doc = MutableDocument(nodes: [
+          ParagraphNode(
+            id: '1',
+            text: AttributedText(text: 'Paragraph1'),
+            metadata: {
+              'textAlign': 'center',
+            },
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc, syntax: MarkdownSyntax.normal), 'Paragraph1');
+      });
+
+      test('empty paragraph', () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: 'Paragraph1')),
+            ParagraphNode(id: '2', text: AttributedText(text: '')),
+            ParagraphNode(id: '3', text: AttributedText(text: 'Paragraph3')),
+          ]),
+        );
+
+        expect(serialized, """Paragraph1
+
+
+
+Paragraph3""");
+      });
+
+      test('separates multiple paragraphs with blank lines', () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: 'Paragraph1')),
+            ParagraphNode(id: '2', text: AttributedText(text: 'Paragraph2')),
+            ParagraphNode(id: '3', text: AttributedText(text: 'Paragraph3')),
+          ]),
+        );
+
+        expect(serialized, """Paragraph1
+
+Paragraph2
+
+Paragraph3""");
+      });
+
+      test('separates paragraph from other blocks with blank lines', () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: 'First Paragraph')),
+            HorizontalRuleNode(id: '2'),
+          ]),
+        );
+
+        expect(serialized, 'First Paragraph\n\n---');
+      });
+
+      test('preserves linebreaks at the end of a paragraph', () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: 'Paragraph1\n\n')),
+            ParagraphNode(id: '2', text: AttributedText(text: 'Paragraph2')),
+          ]),
+        );
+
+        expect(serialized, 'Paragraph1  \n  \n\n\nParagraph2');
+      });
+
+      test('preserves linebreaks within a paragraph', () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: 'Line1\n\nLine2')),
+          ]),
+        );
+
+        expect(serialized, 'Line1  \n  \nLine2');
+      });
+
+      test('preserves linebreaks at the beginning of a paragraph', () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: '\n\nParagraph1')),
+            ParagraphNode(id: '2', text: AttributedText(text: 'Paragraph2')),
+          ]),
+        );
+
+        expect(serialized, '  \n  \nParagraph1\n\nParagraph2');
       });
 
       test('image', () {
@@ -183,7 +499,7 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '![some alt text](https://someimage.com/the/image.png)');
+        expect(serializeDocumentToMarkdown(doc), '![some alt text](https://someimage.com/the/image.png)');
       });
 
       test('horizontal rule', () {
@@ -193,7 +509,7 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '---');
+        expect(serializeDocumentToMarkdown(doc), '---');
       });
 
       test('unordered list items', () {
@@ -228,14 +544,14 @@ This is some code
         ]);
 
         expect(
-            serializeDocumentToMarkdown(doc).trim(),
-            '''
+          serializeDocumentToMarkdown(doc),
+          '''
   * Unordered 1
   * Unordered 2
     * Unordered 2.1
     * Unordered 2.2
-  * Unordered 3'''
-                .trim());
+  * Unordered 3''',
+        );
       });
 
       test('unordered list item with styles', () {
@@ -255,7 +571,7 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '* **Unordered** 1');
+        expect(serializeDocumentToMarkdown(doc), '  * **Unordered** 1');
       });
 
       test('ordered list items', () {
@@ -290,14 +606,14 @@ This is some code
         ]);
 
         expect(
-            serializeDocumentToMarkdown(doc).trim(),
-            '''
+          serializeDocumentToMarkdown(doc),
+          '''
   1. Ordered 1
   1. Ordered 2
     1. Ordered 2.1
     1. Ordered 2.2
-  1. Ordered 3'''
-                .trim());
+  1. Ordered 3''',
+        );
       });
 
       test('ordered list item with styles', () {
@@ -317,7 +633,7 @@ This is some code
           ),
         ]);
 
-        expect(serializeDocumentToMarkdown(doc).trim(), '1. **Ordered** 1');
+        expect(serializeDocumentToMarkdown(doc), '  1. **Ordered** 1');
       });
 
       test('example doc', () {
@@ -387,6 +703,16 @@ This is some code
         // ignore: unused_local_variable
         final markdown = serializeDocumentToMarkdown(doc);
       });
+
+      test("doesn't add empty lines at the end of the document", () {
+        final serialized = serializeDocumentToMarkdown(
+          MutableDocument(nodes: [
+            ParagraphNode(id: '1', text: AttributedText(text: 'Paragraph1')),
+          ]),
+        );
+
+        expect(serialized, 'Paragraph1');
+      });
     });
 
     group('deserialization', () {
@@ -450,7 +776,7 @@ This is some code
       });
 
       test('single styled paragraph', () {
-        const markdown = 'This is **some *styled*** text to parse as markdown';
+        const markdown = 'This is **some *styled*** text to parse as [markdown](https://example.org)';
 
         final document = deserializeMarkdownToDocument(markdown);
 
@@ -465,6 +791,84 @@ This is some code
         expect(styledText.getAllAttributionsAt(8).contains(boldAttribution), true);
         expect(styledText.getAllAttributionsAt(13).containsAll([boldAttribution, italicsAttribution]), true);
         expect(styledText.getAllAttributionsAt(19).isEmpty, true);
+        expect(styledText.getAllAttributionsAt(40).single, LinkAttribution(url: Uri.https('example.org', '')));
+      });
+
+      test('link within multiple styles', () {
+        const markdown = 'This is **some *styled [link](https://example.org) text***';
+
+        final document = deserializeMarkdownToDocument(markdown);
+
+        expect(document.nodes.length, 1);
+        expect(document.nodes.first, isA<ParagraphNode>());
+
+        final paragraph = document.nodes.first as ParagraphNode;
+        final styledText = paragraph.text;
+        expect(styledText.text, 'This is some styled link text');
+
+        expect(styledText.getAllAttributionsAt(0).isEmpty, true);
+        expect(styledText.getAllAttributionsAt(8).contains(boldAttribution), true);
+        expect(styledText.getAllAttributionsAt(13).containsAll([boldAttribution, italicsAttribution]), true);
+        expect(
+            styledText
+                .getAllAttributionsAt(20)
+                .containsAll([boldAttribution, italicsAttribution, LinkAttribution(url: Uri.https('example.org', ''))]),
+            true);
+        expect(styledText.getAllAttributionsAt(25).containsAll([boldAttribution, italicsAttribution]), true);
+      });
+
+      test('completely overlapping link and style', () {
+        const markdown = 'This is **[a test](https://example.org)**';
+
+        final document = deserializeMarkdownToDocument(markdown);
+
+        expect(document.nodes.length, 1);
+        expect(document.nodes.first, isA<ParagraphNode>());
+
+        final paragraph = document.nodes.first as ParagraphNode;
+        final styledText = paragraph.text;
+        expect(styledText.text, 'This is a test');
+
+        expect(styledText.getAllAttributionsAt(0).isEmpty, true);
+        expect(styledText.getAllAttributionsAt(8).contains(boldAttribution), true);
+        expect(
+            styledText
+                .getAllAttributionsAt(13)
+                .containsAll([boldAttribution, LinkAttribution(url: Uri.https('example.org', ''))]),
+            true);
+      });
+
+      test('single style intersecting link', () {
+        // This isn't necessarily the behavior that you would expect, but it has been tested against multiple Markdown
+        // renderers (such as VS Code) and it matches their behaviour.
+        const markdown = 'This **is [a** link](https://example.org) test';
+        final document = deserializeMarkdownToDocument(markdown);
+
+        expect(document.nodes.length, 1);
+        expect(document.nodes.first, isA<ParagraphNode>());
+
+        final paragraph = document.nodes.first as ParagraphNode;
+        final styledText = paragraph.text;
+        expect(styledText.text, 'This **is a** link test');
+
+        expect(styledText.getAllAttributionsAt(9).isEmpty, true);
+        expect(styledText.getAllAttributionsAt(12).single, LinkAttribution(url: Uri.https('example.org', '')));
+      });
+
+      test('empty link', () {
+        // This isn't necessarily the behavior that you would expect, but it has been tested against multiple Markdown
+        // renderers (such as VS Code) and it matches their behaviour.
+        const markdown = 'This is [a link]() test';
+        final document = deserializeMarkdownToDocument(markdown);
+
+        expect(document.nodes.length, 1);
+        expect(document.nodes.first, isA<ParagraphNode>());
+
+        final paragraph = document.nodes.first as ParagraphNode;
+        final styledText = paragraph.text;
+        expect(styledText.text, 'This is a link test');
+
+        expect(styledText.getAllAttributionsAt(12).single, LinkAttribution(url: Uri.parse('')));
       });
 
       test('unordered list', () {
@@ -543,6 +947,197 @@ This is some code
 
         expect(document.nodes[17], isA<ParagraphNode>());
       });
+
+      test('paragraph with strikethrough', () {
+        final doc = deserializeMarkdownToDocument('~This is~ a paragraph.');
+        final styledText = (doc.nodes[0] as ParagraphNode).text;
+
+        // Ensure text within the range is attributed.
+        expect(styledText.getAllAttributionsAt(0).contains(strikethroughAttribution), true);
+        expect(styledText.getAllAttributionsAt(6).contains(strikethroughAttribution), true);
+
+        // Ensure text outside the range isn't attributed.
+        expect(styledText.getAllAttributionsAt(7).contains(strikethroughAttribution), false);
+      });
+
+      test('paragraph with underline', () {
+        final doc = deserializeMarkdownToDocument('¬This is¬ a paragraph.');
+        final styledText = (doc.nodes[0] as ParagraphNode).text;
+
+        // Ensure text within the range is attributed.
+        expect(styledText.getAllAttributionsAt(0).contains(underlineAttribution), true);
+        expect(styledText.getAllAttributionsAt(6).contains(underlineAttribution), true);
+
+        // Ensure text outside the range isn't attributed.
+        expect(styledText.getAllAttributionsAt(7).contains(underlineAttribution), false);
+      });
+
+      test('paragraph with left alignment', () {
+        final doc = deserializeMarkdownToDocument(':---\nParagraph1');
+
+        final paragraph = doc.nodes.first as ParagraphNode;
+        expect(paragraph.getMetadataValue('textAlign'), 'left');
+        expect(paragraph.text.text, 'Paragraph1');
+      });
+
+      test('paragraph with center alignment', () {
+        final doc = deserializeMarkdownToDocument(':---:\nParagraph1');
+
+        final paragraph = doc.nodes.first as ParagraphNode;
+        expect(paragraph.getMetadataValue('textAlign'), 'center');
+        expect(paragraph.text.text, 'Paragraph1');
+      });
+
+      test('paragraph with right alignment', () {
+        final doc = deserializeMarkdownToDocument('---:\nParagraph1');
+
+        final paragraph = doc.nodes.first as ParagraphNode;
+        expect(paragraph.getMetadataValue('textAlign'), 'right');
+        expect(paragraph.text.text, 'Paragraph1');
+      });
+
+      test('treats alignment token as text at the end of the document', () {
+        final doc = deserializeMarkdownToDocument('---:');
+
+        final paragraph = doc.nodes.first as ParagraphNode;
+        expect(paragraph.getMetadataValue('textAlign'), isNull);
+        expect(paragraph.text.text, '---:');
+      });
+
+      test('treats alignment token as text when not followed by a paragraph', () {
+        final doc = deserializeMarkdownToDocument('---:\n - - -');
+
+        final paragraph = doc.nodes.first as ParagraphNode;
+        expect(paragraph.getMetadataValue('textAlign'), isNull);
+        expect(paragraph.text.text, '---:');
+
+        // Ensure the horizontal rule is parsed.
+        expect(doc.nodes[1], isA<HorizontalRuleNode>());
+      });
+
+      test('treats alignment token as text when not using supereditor syntax', () {
+        final doc = deserializeMarkdownToDocument(':---\nParagraph1', syntax: MarkdownSyntax.normal);
+
+        final paragraph = doc.nodes.first as ParagraphNode;
+        expect(paragraph.getMetadataValue('textAlign'), isNull);
+        expect(paragraph.text.text, ':---\nParagraph1');
+      });
+
+      test('multiple paragraphs', () {
+        final input = """Paragraph1
+
+Paragraph2""";
+        final doc = deserializeMarkdownToDocument(input);
+
+        expect(doc.nodes.length, 2);
+        expect((doc.nodes[0] as ParagraphNode).text.text, 'Paragraph1');
+        expect((doc.nodes[1] as ParagraphNode).text.text, 'Paragraph2');
+      });
+
+      test('empty paragraph between paragraphs', () {
+        final input = """Paragraph1
+
+
+
+Paragraph3""";
+        final doc = deserializeMarkdownToDocument(input);
+
+        expect(doc.nodes.length, 3);
+        expect((doc.nodes[0] as ParagraphNode).text.text, 'Paragraph1');
+        expect((doc.nodes[1] as ParagraphNode).text.text, '');
+        expect((doc.nodes[2] as ParagraphNode).text.text, 'Paragraph3');
+      });
+
+      test('multiple empty paragraph between paragraphs', () {
+        final input = """Paragraph1
+
+
+
+
+
+Paragraph4""";
+        final doc = deserializeMarkdownToDocument(input);
+
+        expect(doc.nodes.length, 4);
+        expect((doc.nodes[0] as ParagraphNode).text.text, 'Paragraph1');
+        expect((doc.nodes[1] as ParagraphNode).text.text, '');
+        expect((doc.nodes[2] as ParagraphNode).text.text, '');
+        expect((doc.nodes[3] as ParagraphNode).text.text, 'Paragraph4');
+      });
+
+      test('paragraph ending with one blank line', () {
+        final doc = deserializeMarkdownToDocument('First Paragraph.  \n\n\nSecond Paragraph');
+        expect(doc.nodes.length, 2);
+
+        expect(doc.nodes.first, isA<ParagraphNode>());
+        expect((doc.nodes.first as ParagraphNode).text.text, 'First Paragraph.\n');
+
+        expect(doc.nodes.last, isA<ParagraphNode>());
+        expect((doc.nodes.last as ParagraphNode).text.text, 'Second Paragraph');
+      });
+
+      test('paragraph ending with multiple blank lines', () {
+        final doc = deserializeMarkdownToDocument('First Paragraph.  \n  \n  \n\n\nSecond Paragraph');
+
+        expect(doc.nodes.length, 2);
+
+        expect(doc.nodes.first, isA<ParagraphNode>());
+        expect((doc.nodes.first as ParagraphNode).text.text, 'First Paragraph.\n\n\n');
+
+        expect(doc.nodes.last, isA<ParagraphNode>());
+        expect((doc.nodes.last as ParagraphNode).text.text, 'Second Paragraph');
+      });
+
+      test('paragraph with multiple blank lines at the middle', () {
+        final doc =
+            deserializeMarkdownToDocument('First Paragraph.  \n  \n  \nStill First Paragraph\n\nSecond Paragraph');
+
+        expect(doc.nodes.length, 2);
+
+        expect(doc.nodes.first, isA<ParagraphNode>());
+        expect((doc.nodes.first as ParagraphNode).text.text, 'First Paragraph.\n\n\nStill First Paragraph');
+
+        expect(doc.nodes.last, isA<ParagraphNode>());
+        expect((doc.nodes.last as ParagraphNode).text.text, 'Second Paragraph');
+      });
+
+      test('paragraph beginning with multiple blank lines', () {
+        final doc =
+            deserializeMarkdownToDocument('  \n  \nFirst Paragraph.\n\nSecond Paragraph');
+
+        expect(doc.nodes.length, 2);
+
+        expect(doc.nodes.first, isA<ParagraphNode>());
+        expect((doc.nodes.first as ParagraphNode).text.text, '\n\nFirst Paragraph.');
+
+        expect(doc.nodes.last, isA<ParagraphNode>());
+        expect((doc.nodes.last as ParagraphNode).text.text, 'Second Paragraph');
+      });
+    
+      test('document ending with an empty paragraph', () {
+        final doc = deserializeMarkdownToDocument("""
+First Paragraph.
+
+
+""");
+
+        expect(doc.nodes.length, 2);
+
+        expect(doc.nodes.first, isA<ParagraphNode>());
+        expect((doc.nodes.first as ParagraphNode).text.text, 'First Paragraph.');
+
+        expect(doc.nodes.last, isA<ParagraphNode>());
+        expect((doc.nodes.last as ParagraphNode).text.text, '');
+      });
+
+      test('empty markdown produces an empty paragraph', () {
+        final doc = deserializeMarkdownToDocument('');
+
+        expect(doc.nodes.length, 1);
+
+        expect(doc.nodes.first, isA<ParagraphNode>());
+        expect((doc.nodes.first as ParagraphNode).text.text, '');
+      });
     });
   });
 }
@@ -550,7 +1145,7 @@ This is some code
 const exampleMarkdownDoc1 = '''
 # Example 1
 ---
-This is an example doc that has various types of nodes.
+This is an example doc that has various types of nodes, like [links](https://example.org).
 
 It includes multiple paragraphs, ordered list items, unordered list items, images, and HRs.
 

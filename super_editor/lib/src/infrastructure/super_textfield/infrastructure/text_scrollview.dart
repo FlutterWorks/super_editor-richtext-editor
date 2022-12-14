@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/super_textfield.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 final _log = scrollingTextFieldLog;
 
@@ -32,18 +32,17 @@ class TextScrollView extends StatefulWidget {
     this.lineHeight,
     this.perLineAutoScrollDuration = Duration.zero,
     this.showDebugPaint = false,
+    this.textAlign = TextAlign.left,
+    this.padding,
     required this.child,
-  })  : assert(minLines == null || minLines == 1 || lineHeight != null, 'minLines > 1 requires a non-null lineHeight'),
-        assert(maxLines == null || maxLines == 1 || lineHeight != null, 'maxLines > 1 requires a non-null lineHeight'),
-        super(key: key);
+  }) : super(key: key);
 
   /// Controller that sets the scroll offset and orchestrates
   /// auto-scrolling behavior.
   final TextScrollController textScrollController;
 
-  /// [GobalKey] that references the [SuperSelectableText] within
-  /// the [child] subtree.
-  final GlobalKey<SuperSelectableTextState> textKey;
+  /// [GlobalKey] that references the widget that contains the scrolling text.
+  final GlobalKey<ProseTextState> textKey;
 
   /// Controller that owns the text content and text selection for
   /// the [SuperSelectableText] within the [child] subtree.
@@ -78,12 +77,10 @@ class TextScrollView extends StatefulWidget {
   /// The height of a single line of text in this text scroll view, used
   /// with [minLines] and [maxLines] to size the text field.
   ///
-  /// An explicit [lineHeight] is required for multi-line text fields
-  /// because rich text in this text scroll view might have lines of
-  /// varying height, which would result in a constantly changing text
-  /// field height during scrolling. To avoid that situation, a single,
-  /// explicit [lineHeight] is provided and used for all text field height
-  /// calculations.
+  /// If a [lineHeight] is provided, the [TextScrollView] is sized as a
+  /// multiple of that [lineHeight]. If no [lineHeight] is provided, the
+  /// [TextScrollView] is sized as a multiple of the line-height of the
+  /// first line of text.
   final double? lineHeight;
 
   /// The time it takes to scroll to the next line, when auto-scrolling.
@@ -94,11 +91,18 @@ class TextScrollView extends StatefulWidget {
   /// Whether to paint debug guides.
   final bool showDebugPaint;
 
+  /// The text alignment within the scrollview.
+  final TextAlign textAlign;
+
+  /// Padding placed around the text content of this text field, but within the
+  /// scrollable viewport.
+  final EdgeInsets? padding;
+
   /// The child widget.
   final Widget child;
 
   @override
-  _TextScrollViewState createState() => _TextScrollViewState();
+  State createState() => _TextScrollViewState();
 }
 
 class _TextScrollViewState extends State<TextScrollView>
@@ -121,6 +125,8 @@ class _TextScrollViewState extends State<TextScrollView>
     widget.textScrollController
       ..delegate = this
       ..addListener(_onTextScrollChange);
+
+    widget.textEditingController.addListener(_scheduleViewportHeightUpdate);
   }
 
   @override
@@ -137,14 +143,17 @@ class _TextScrollViewState extends State<TextScrollView>
         ..addListener(_onTextScrollChange);
     }
 
+    if (widget.textEditingController != oldWidget.textEditingController) {
+      oldWidget.textEditingController.removeListener(_scheduleViewportHeightUpdate);
+      widget.textEditingController.addListener(_scheduleViewportHeightUpdate);
+
+      _scheduleViewportHeightUpdate();
+    }
+
     if (widget.minLines != oldWidget.minLines ||
         widget.maxLines != oldWidget.maxLines ||
         widget.lineHeight != oldWidget.lineHeight) {
-      // Force a new viewport height calculation.
-      setState(() {
-        _log.fine('Need another viewport height');
-        _needViewportHeight = true;
-      });
+      _scheduleViewportHeightUpdate();
     }
   }
 
@@ -153,6 +162,8 @@ class _TextScrollViewState extends State<TextScrollView>
     widget.textScrollController
       ..delegate = null
       ..removeListener(_onTextScrollChange);
+
+    widget.textEditingController.removeListener(_scheduleViewportHeightUpdate);
 
     super.dispose();
   }
@@ -193,7 +204,8 @@ class _TextScrollViewState extends State<TextScrollView>
     }
 
     final lastCharacterPosition = TextPosition(offset: widget.textEditingController.text.text.length - 1);
-    return _text.getCharacterBox(lastCharacterPosition).bottom - viewportHeight;
+    return (_textLayout.getCharacterBox(lastCharacterPosition)?.bottom ?? _textLayout.estimatedLineHeight) -
+        viewportHeight;
   }
 
   @override
@@ -204,9 +216,10 @@ class _TextScrollViewState extends State<TextScrollView>
         return false;
       }
 
-      final characterBox = _text.getCharacterBox(position);
-      final scrolledCharacterTop = characterBox.top - _scrollController.offset;
-      final scrolledCharacterBottom = characterBox.bottom - _scrollController.offset;
+      final characterBox = _textLayout.getCharacterBox(position);
+      final scrolledCharacterTop = (characterBox?.top ?? 0.0) - _scrollController.offset;
+      final scrolledCharacterBottom =
+          (characterBox?.bottom ?? _textLayout.estimatedLineHeight) - _scrollController.offset;
       // Round the top/bottom values to avoid false negatives due to floating point accuracy.
       return scrolledCharacterTop.round() >= 0 && scrolledCharacterBottom.round() <= viewportHeight;
     } else {
@@ -215,7 +228,7 @@ class _TextScrollViewState extends State<TextScrollView>
         return false;
       }
 
-      final offsetInViewport = _text.getOffsetAtPosition(position) - Offset(_scrollController.offset, 0);
+      final offsetInViewport = _textLayout.getOffsetAtPosition(position) - Offset(_scrollController.offset, 0);
       // Round the top/bottom values to avoid false negatives due to floating point accuracy.
       return offsetInViewport.dx.round() >= 0 && offsetInViewport.dx.round() <= viewportWidth;
     }
@@ -251,18 +264,18 @@ class _TextScrollViewState extends State<TextScrollView>
 
   @override
   Rect getCharacterRectAtPosition(TextPosition position) {
-    return _text.getCharacterBox(position).toRect();
+    return _textLayout.getCharacterBox(position)?.toRect() ?? Rect.fromLTRB(0, 0, 0, _textLayout.estimatedLineHeight);
   }
 
   @override
   double getHorizontalOffsetForStartOfCharacterLeftOfViewport() {
     // Note: we look for an offset that is slightly further down than zero
     // to avoid any issues with the layout system differentiating between lines.
-    final textPositionAtLeftEnd = _text.getPositionNearestToOffset(Offset(_scrollController.offset, 5));
+    final textPositionAtLeftEnd = _textLayout.getPositionNearestToOffset(Offset(_scrollController.offset, 5));
     final nextPosition = textPositionAtLeftEnd.offset <= 0
         ? textPositionAtLeftEnd
         : TextPosition(offset: textPositionAtLeftEnd.offset - 1);
-    return _text.getOffsetAtPosition(nextPosition).dx;
+    return _textLayout.getOffsetAtPosition(nextPosition).dx;
   }
 
   @override
@@ -271,11 +284,11 @@ class _TextScrollViewState extends State<TextScrollView>
     // Note: we look for an offset that is slightly further down than zero
     // to avoid any issues with the layout system differentiating between lines.
     final textPositionAtRightEnd =
-        _text.getPositionNearestToOffset(Offset(viewportWidth + _scrollController.offset, 5));
+        _textLayout.getPositionNearestToOffset(Offset(viewportWidth + _scrollController.offset, 5));
     final nextPosition = textPositionAtRightEnd.offset >= widget.textEditingController.text.text.length - 1
         ? textPositionAtRightEnd
         : TextPosition(offset: textPositionAtRightEnd.offset + 1);
-    return _text.getOffsetAtPosition(nextPosition).dx;
+    return _textLayout.getOffsetAtPosition(nextPosition).dx;
   }
 
   @override
@@ -283,8 +296,8 @@ class _TextScrollViewState extends State<TextScrollView>
     final topOfFirstLine = _scrollController.offset;
     // Note: we nudge the vertical offset up a few pixels to see if we
     // find a text position in the line above.
-    final textPositionOneLineUp = _text.getPositionNearestToOffset(Offset(0, topOfFirstLine - 5));
-    return _text.getOffsetAtPosition(textPositionOneLineUp).dy;
+    final textPositionOneLineUp = _textLayout.getPositionNearestToOffset(Offset(0, topOfFirstLine - 5));
+    return _textLayout.getOffsetAtPosition(textPositionOneLineUp).dy;
   }
 
   @override
@@ -297,8 +310,9 @@ class _TextScrollViewState extends State<TextScrollView>
     final bottomOfLastLine = viewportHeight! + _scrollController.offset;
     // Note: we nudge the vertical offset down a few pixels to see if we
     // find a text position in the line below.
-    final textPositionOneLineDown = _text.getPositionNearestToOffset(Offset(0, bottomOfLastLine + 5));
-    final bottomOfCharacter = _text.getCharacterBox(textPositionOneLineDown).bottom;
+    final textPositionOneLineDown = _textLayout.getPositionNearestToOffset(Offset(0, bottomOfLastLine + 5));
+    final bottomOfCharacter =
+        (_textLayout.getCharacterBox(textPositionOneLineDown)?.bottom ?? _textLayout.estimatedLineHeight);
     return bottomOfCharacter;
   }
 
@@ -321,22 +335,53 @@ class _TextScrollViewState extends State<TextScrollView>
     final linesOfText = _getLineCount();
     _log.finer(' - lines of text: $linesOfText');
 
-    final estimatedContentHeight = linesOfText * widget.lineHeight!;
+    late double estimatedLineHeight;
+    if (widget.lineHeight != null) {
+      _log.finer(' - explicit line height provided: ${widget.lineHeight}');
+      // Use the line height that was explicitly provided by the widget.
+      estimatedLineHeight = widget.lineHeight!;
+    } else {
+      _log.finer(' - calculating an estimated line height for the field');
+      // No line height was provided. Calculate a best-guess.
+      final textLayout = widget.textKey.currentState!.textLayout;
+      estimatedLineHeight = textLayout.getLineHeightAtPosition(const TextPosition(offset: 0));
+      _log.finer(' - line height at position 0: $estimatedLineHeight');
+
+      // We got 0.0 for the line height at the beginning of text. Maybe the
+      // text is empty. Ask the TextLayout to estimate a height for us that's
+      // based on the text style.
+      if (estimatedLineHeight == 0) {
+        estimatedLineHeight = widget.textKey.currentState!.textLayout.estimatedLineHeight;
+        _log.finer(' - estimated line height based on text styles: $estimatedLineHeight');
+      }
+    }
+
+    final totalVerticalPadding = widget.padding?.vertical ?? 0.0;
+
+    final estimatedContentHeight = (linesOfText * estimatedLineHeight) + totalVerticalPadding;
     _log.finer(' - estimated content height: $estimatedContentHeight');
 
-    final minHeight = widget.minLines != null
-        ? widget.minLines! * widget.lineHeight!
-        : widget.lineHeight; // Can't be shorter than 1 line
-    final maxHeight = widget.maxLines != null //
-        ? widget.maxLines! * widget.lineHeight! //
+    final minContentHeight = widget.minLines != null //
+        ? widget.minLines! * estimatedLineHeight
+        : estimatedLineHeight; // Can't be shorter than 1 line.
+
+    final minHeight = minContentHeight + totalVerticalPadding;
+
+    final maxContentHeight = widget.maxLines != null //
+        ? (widget.maxLines! * estimatedLineHeight) //
         : null;
+
+    final maxHeight = maxContentHeight != null //
+        ? maxContentHeight + totalVerticalPadding
+        : null;
+
     _log.finer(' - minHeight: $minHeight, maxHeight: $maxHeight');
 
     double? viewportHeight;
     if (maxHeight != null && estimatedContentHeight >= maxHeight) {
       _log.finer(' - setting viewport height to maxHeight');
       viewportHeight = maxHeight;
-    } else if (minHeight != null && estimatedContentHeight <= minHeight) {
+    } else if (estimatedContentHeight <= minHeight) {
       _log.finer(' - setting viewport height to minHeight');
       viewportHeight = minHeight;
     }
@@ -347,11 +392,15 @@ class _TextScrollViewState extends State<TextScrollView>
       return false;
     }
 
-    if (viewportHeight == null && isMultiline && !isBounded) {
-      // We don't have a viewport height, but we're multiline and
-      // unbounded so a null viewport height is fine. We'll wrap
-      // the intrinsic height of the text.
-      _log.finer(' - viewport height is null, but TextScrollView is unbounded so that is OK');
+    final wantsUnboundedIntrinsicHeight = viewportHeight == null && isMultiline && !isBounded;
+    final multilineContentFitsMaxHeight =
+        viewportHeight == null && isMultiline && isBounded && estimatedContentHeight <= maxHeight!;
+
+    if (wantsUnboundedIntrinsicHeight || multilineContentFitsMaxHeight) {
+      // We have either an unbounded height or our estimated content height fits inside our max height.
+      // The viewport should expand to fit its content.
+      _log.finer(
+          ' - viewport height is null, but TextScrollView is unbounded or the content fits max height, so that is OK');
       final didChange = viewportHeight != _viewportHeight;
       if (mounted) {
         setState(() {
@@ -374,7 +423,7 @@ class _TextScrollViewState extends State<TextScrollView>
       _log.finer(' - could not calculate a viewport height. Rescheduling calculation.');
 
       // We still don't have a resolved viewport height. Run again next frame.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         if (mounted) {
           setState(() {
             _updateViewportHeight();
@@ -395,12 +444,23 @@ class _TextScrollViewState extends State<TextScrollView>
       return 0;
     }
 
-    return widget.textKey.currentState!.getLineCount();
+    return _textLayout.getLineCount();
   }
 
-  /// Returns the [SuperSelectableTextState] that lays out and renders the
+  void _scheduleViewportHeightUpdate() {
+    // The viewport height is calculated using the number of the lines of text.
+    // Therefore, when text changes we need to recalculate the viewport height
+    // to accommodate the new text.
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      if (mounted) {
+        _updateViewportHeight();
+      }
+    });
+  }
+
+  /// Returns the [ProseTextLayout] that lays out and renders the
   /// text in this text field.
-  SuperSelectableTextState get _text => widget.textKey.currentState!;
+  ProseTextLayout get _textLayout => widget.textKey.currentState!.textLayout;
 
   @override
   Widget build(BuildContext context) {
@@ -408,7 +468,7 @@ class _TextScrollViewState extends State<TextScrollView>
       // The text hasn't been laid out yet, which means our calculations
       // for text height is probably wrong. Schedule a post frame callback
       // to re-calculate the height after initial layout.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         if (mounted) {
           _updateViewportHeight();
         }
@@ -416,7 +476,9 @@ class _TextScrollViewState extends State<TextScrollView>
     }
 
     return Opacity(
-      opacity: (widget.maxLines != null && widget.maxLines! > 1 && _viewportHeight == null) ? 0.0 : 1.0,
+      opacity: (widget.maxLines != null && widget.maxLines! > 1 && _viewportHeight == null && _needViewportHeight)
+          ? 0.0
+          : 1.0,
       child: SizedBox(
         width: double.infinity,
         height: _viewportHeight,
@@ -432,15 +494,37 @@ class _TextScrollViewState extends State<TextScrollView>
     );
   }
 
+  Alignment _getAlignment() {
+    switch (widget.textAlign) {
+      case TextAlign.left:
+      case TextAlign.justify:
+        return Alignment.topLeft;
+      case TextAlign.right:
+        return Alignment.topRight;
+      case TextAlign.center:
+        return Alignment.topCenter;
+      case TextAlign.start:
+        return Directionality.of(context) == TextDirection.ltr ? Alignment.topLeft : Alignment.topRight;
+      case TextAlign.end:
+        return Directionality.of(context) == TextDirection.ltr ? Alignment.topRight : Alignment.topLeft;
+    }
+  }
+
   Widget _buildScrollView({
     required Widget child,
   }) {
-    return SingleChildScrollView(
-      key: _textFieldViewportKey,
-      controller: _scrollController,
-      physics: const NeverScrollableScrollPhysics(),
-      scrollDirection: isMultiline ? Axis.vertical : Axis.horizontal,
-      child: widget.child,
+    return Align(
+      alignment: _getAlignment(),
+      child: SingleChildScrollView(
+        key: _textFieldViewportKey,
+        controller: _scrollController,
+        physics: const NeverScrollableScrollPhysics(),
+        scrollDirection: isMultiline ? Axis.vertical : Axis.horizontal,
+        child: Padding(
+          padding: widget.padding ?? EdgeInsets.zero,
+          child: widget.child,
+        ),
+      ),
     );
   }
 
@@ -847,16 +931,30 @@ class TextScrollController with ChangeNotifier {
     assert(_delegate != null);
 
     _log.finer('Ensuring rect is visible: $rect');
-    if (rect.top < 0) {
-      // The character is entirely or partially above the top of the viewport.
-      // Scroll the content down.
-      _scrollOffset = rect.top;
-      _log.finer(' - updated _scrollOffset to $_scrollOffset');
-    } else if (rect.bottom > _delegate!.viewportHeight!) {
-      // The character is entirely or partially below the bottom of the viewport.
-      // Scroll the content up.
-      _scrollOffset = rect.bottom - _delegate!.viewportHeight!;
-      _log.finer(' - updated _scrollOffset to $_scrollOffset');
+    if (_delegate!.isMultiline) {
+      if (rect.top < 0) {
+        // The character is entirely or partially above the top of the viewport.
+        // Scroll the content down.
+        _scrollOffset = rect.top;
+        _log.finer(' - updated _scrollOffset to $_scrollOffset');
+      } else if (rect.bottom > _delegate!.viewportHeight!) {
+        // The character is entirely or partially below the bottom of the viewport.
+        // Scroll the content up.
+        _scrollOffset = rect.bottom - _delegate!.viewportHeight!;
+        _log.finer(' - updated _scrollOffset to $_scrollOffset');
+      }
+    } else {
+      if (rect.left < 0) {
+        // The character is entirely or partially before the start of the viewport.
+        // Scroll the content right.
+        _scrollOffset = rect.left;
+        _log.finer(' - updated _scrollOffset to $_scrollOffset');
+      } else if (rect.right > _delegate!.viewportWidth!) {
+        // The character is entirely or partially after the end of the viewport.
+        // Scroll the content left.
+        _scrollOffset = rect.right - _delegate!.viewportWidth!;
+        _log.finer(' - updated _scrollOffset to $_scrollOffset');
+      }
     }
 
     notifyListeners();

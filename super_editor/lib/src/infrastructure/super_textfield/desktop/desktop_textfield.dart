@@ -1,21 +1,24 @@
 import 'dart:math';
-import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide SelectableText;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:super_editor/src/default_editor/super_editor.dart';
+import 'package:super_editor/src/core/document_layout.dart';
 import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
+import 'package:super_editor/src/infrastructure/focus.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/attributed_text_editing_controller.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/hint_text.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 import '../../keyboard.dart';
 import '../../multi_tap_gesture.dart';
+import '../infrastructure/fill_width_if_constrained.dart';
+import '../styles.dart';
 
 final _log = textFieldLog;
 
@@ -37,14 +40,14 @@ class SuperDesktopTextField extends StatefulWidget {
     Key? key,
     this.focusNode,
     this.textController,
-    this.textStyleBuilder = defaultStyleBuilder,
+    this.textStyleBuilder = defaultTextFieldStyleBuilder,
     this.textAlign = TextAlign.left,
     this.hintBehavior = HintBehavior.displayHintUntilFocus,
     this.hintBuilder,
-    this.textSelectionDecoration = const TextSelectionDecoration(
-      selectionColor: Color(0xFFACCEF7),
+    this.selectionHighlightStyle = const SelectionHighlightStyle(
+      color: Color(0xFFACCEF7),
     ),
-    this.textCaretFactory = const TextCaretFactory(
+    this.caretStyle = const CaretStyle(
       color: Colors.black,
       width: 1,
       borderRadius: BorderRadius.zero,
@@ -76,12 +79,11 @@ class SuperDesktopTextField extends StatefulWidget {
   /// The alignment to use for text in this text field.
   final TextAlign textAlign;
 
-  /// The visual decoration to apply to the `textSelection`.
-  final TextSelectionDecoration textSelectionDecoration;
+  /// The visual representation of the user's selection highlight.
+  final SelectionHighlightStyle selectionHighlightStyle;
 
-  /// Builds the visual representation of the caret in this
-  /// `SelectableText` widget.
-  final TextCaretFactory textCaretFactory;
+  /// The visual representation of the caret in this `SelectableText` widget.
+  final CaretStyle caretStyle;
 
   final EdgeInsetsGeometry padding;
 
@@ -100,8 +102,8 @@ class SuperDesktopTextField extends StatefulWidget {
   SuperDesktopTextFieldState createState() => SuperDesktopTextFieldState();
 }
 
-class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
-  final _selectableTextKey = GlobalKey<SuperSelectableTextState>();
+class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements ProseTextBlock {
+  final _textKey = GlobalKey<ProseTextState>();
   final _textScrollKey = GlobalKey<SuperTextFieldScrollviewState>();
   late FocusNode _focusNode;
   bool _hasFocus = false; // cache whether we have focus so we know when it changes
@@ -111,16 +113,20 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
 
   double? _viewportHeight;
 
+  final _estimatedLineHeight = _EstimatedLineHeight();
+
   @override
   void initState() {
     super.initState();
 
-    _focusNode = (widget.focusNode ?? FocusNode())..addListener(_onFocusChange);
-    _hasFocus = _focusNode.hasFocus;
+    _focusNode = (widget.focusNode ?? FocusNode())..addListener(_updateSelectionOnFocusChange);
 
     _controller = (widget.textController ?? AttributedTextEditingController())
       ..addListener(_onSelectionOrContentChange);
     _scrollController = ScrollController();
+
+    // Check if we need to update the selection.
+    _updateSelectionOnFocusChange();
   }
 
   @override
@@ -128,12 +134,14 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
     super.didUpdateWidget(oldWidget);
 
     if (widget.focusNode != oldWidget.focusNode) {
-      _focusNode.removeListener(_onFocusChange);
+      _focusNode.removeListener(_updateSelectionOnFocusChange);
       if (oldWidget.focusNode == null) {
         _focusNode.dispose();
       }
-      _focusNode = (widget.focusNode ?? FocusNode())..addListener(_onFocusChange);
-      _hasFocus = _focusNode.hasFocus;
+      _focusNode = (widget.focusNode ?? FocusNode())..addListener(_updateSelectionOnFocusChange);
+
+      // Check if we need to update the selection.
+      _updateSelectionOnFocusChange();
     }
 
     if (widget.textController != oldWidget.textController) {
@@ -155,7 +163,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _focusNode.removeListener(_onFocusChange);
+    _focusNode.removeListener(_updateSelectionOnFocusChange);
     if (widget.focusNode == null) {
       _focusNode.dispose();
     }
@@ -167,7 +175,8 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
     super.dispose();
   }
 
-  TextLayout get textLayout => _selectableTextKey.currentState as TextLayout;
+  @override
+  ProseTextLayout get textLayout => _textKey.currentState!.textLayout;
 
   FocusNode get focusNode => _focusNode;
 
@@ -175,7 +184,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
     _focusNode.requestFocus();
   }
 
-  void _onFocusChange() {
+  void _updateSelectionOnFocusChange() {
     // If our FocusNode just received focus, automatically set our
     // controller's text position to the end of the available content.
     //
@@ -192,7 +201,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
     // Use a post-frame callback to "ensure selection extent is visible"
     // so that any pending visual content changes can happen before
     // attempting to calculate the visual position of the selection extent.
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (mounted) {
         _updateViewportHeight();
       }
@@ -203,7 +212,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
   bool _updateViewportHeight() {
     final estimatedLineHeight = _getEstimatedLineHeight();
     final estimatedLinesOfText = _getEstimatedLinesOfText();
-    final estimatedContentHeight = estimatedLinesOfText * estimatedLineHeight;
+    final estimatedContentHeight = (estimatedLinesOfText * estimatedLineHeight) + widget.padding.vertical;
     final minHeight = widget.minLines != null ? widget.minLines! * estimatedLineHeight + widget.padding.vertical : null;
     final maxHeight = widget.maxLines != null ? widget.maxLines! * estimatedLineHeight + widget.padding.vertical : null;
     double? viewportHeight;
@@ -230,12 +239,11 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
       return 0;
     }
 
-    if (_selectableTextKey.currentState == null) {
+    if (_textKey.currentState == null) {
       return 0;
     }
 
-    final offsetAtEndOfText =
-        _selectableTextKey.currentState!.getOffsetAtPosition(TextPosition(offset: _controller.text.text.length));
+    final offsetAtEndOfText = textLayout.getOffsetAtPosition(TextPosition(offset: _controller.text.text.length));
     int lineCount = (offsetAtEndOfText.dy / _getEstimatedLineHeight()).ceil();
 
     if (_controller.text.text.endsWith('\n')) {
@@ -246,17 +254,27 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
   }
 
   double _getEstimatedLineHeight() {
+    // After hot reloading, the text layout might be null, so we can't
+    // directly use _textKey.currentState!.textLayout because using it
+    // we can't check for null.
+    final textLayout = RenderSuperTextLayout.textLayoutFrom(_textKey);
+    final lineHeight = _controller.text.text.isEmpty || textLayout == null
+        ? 0.0
+        : textLayout.getLineHeightAtPosition(const TextPosition(offset: 0));
+    if (lineHeight > 0) {
+      return lineHeight;
+    }
     final defaultStyle = widget.textStyleBuilder({});
-    return (defaultStyle.height ?? 1.0) * defaultStyle.fontSize!;
+    return _estimatedLineHeight.calculate(defaultStyle);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_selectableTextKey.currentContext == null) {
+    if (_textKey.currentContext == null) {
       // The text hasn't been laid out yet, which means our calculations
       // for text height is probably wrong. Schedule a post frame callback
       // to re-calculate the height after initial layout.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         if (mounted) {
           setState(() {
             _updateViewportHeight();
@@ -270,12 +288,12 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
     return SuperTextFieldKeyboardInteractor(
       focusNode: _focusNode,
       textController: _controller,
-      textKey: _selectableTextKey,
+      textKey: _textKey,
       keyboardActions: widget.keyboardHandlers,
       child: SuperTextFieldGestureInteractor(
         focusNode: _focusNode,
         textController: _controller,
-        textKey: _selectableTextKey,
+        textKey: _textKey,
         textScrollKey: _textScrollKey,
         isMultiline: isMultiline,
         onRightClick: widget.onRightClick,
@@ -293,8 +311,9 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
             return _buildDecoration(
               child: SuperTextFieldScrollview(
                 key: _textScrollKey,
-                textKey: _selectableTextKey,
+                textKey: _textKey,
                 textController: _controller,
+                textAlign: widget.textAlign,
                 scrollController: _scrollController,
                 viewportHeight: _viewportHeight,
                 estimatedLineHeight: _getEstimatedLineHeight(),
@@ -321,14 +340,18 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> {
   }
 
   Widget _buildSelectableText() {
-    return SuperSelectableText(
-      key: _selectableTextKey,
-      textSpan: _controller.text.computeTextSpan(widget.textStyleBuilder),
-      textAlign: widget.textAlign,
-      textSelection: _controller.selection,
-      textSelectionDecoration: widget.textSelectionDecoration,
-      showCaret: _focusNode.hasFocus,
-      textCaretFactory: widget.textCaretFactory,
+    return FillWidthIfConstrained(
+      child: SuperTextWithSelection.single(
+        key: _textKey,
+        richText: _controller.text.computeTextSpan(widget.textStyleBuilder),
+        textAlign: widget.textAlign,
+        userSelection: UserSelection(
+          highlightStyle: widget.selectionHighlightStyle,
+          caretStyle: widget.caretStyle,
+          selection: _controller.selection,
+          hasCaret: _focusNode.hasFocus,
+        ),
+      ),
     );
   }
 }
@@ -367,8 +390,8 @@ class SuperTextFieldGestureInteractor extends StatefulWidget {
   final AttributedTextEditingController textController;
 
   /// [GlobalKey] that links this [SuperTextFieldGestureInteractor] to
-  /// the [SuperSelectableText] widget that paints the text for this text field.
-  final GlobalKey<SuperSelectableTextState> textKey;
+  /// the [ProseTextLayout] widget that paints the text for this text field.
+  final GlobalKey<ProseTextState> textKey;
 
   /// [GlobalKey] that links this [SuperTextFieldGestureInteractor] to
   /// the [SuperTextFieldScrollview] that's responsible for scrolling
@@ -385,12 +408,10 @@ class SuperTextFieldGestureInteractor extends StatefulWidget {
   final Widget child;
 
   @override
-  _SuperTextFieldGestureInteractorState createState() => _SuperTextFieldGestureInteractorState();
+  State createState() => _SuperTextFieldGestureInteractorState();
 }
 
 class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureInteractor> {
-  final _cursorStyle = ValueNotifier<MouseCursor>(SystemMouseCursors.basic);
-
   _SelectionType _selectionType = _SelectionType.position;
   Offset? _dragStartInViewport;
   Offset? _dragStartInText;
@@ -401,7 +422,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
   final _dragGutterExtent = 24;
   final _maxDragSpeed = 20;
 
-  SuperSelectableTextState get _text => widget.textKey.currentState!;
+  ProseTextLayout get _textLayout => widget.textKey.currentState!.textLayout;
 
   SuperTextFieldScrollviewState get _textScroll => widget.textScrollKey.currentState!;
 
@@ -440,7 +461,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
 
     if (tapTextPosition != null) {
       setState(() {
-        widget.textController.selection = _text.getWordSelectionAt(tapTextPosition);
+        widget.textController.selection = _textLayout.getWordSelectionAt(tapTextPosition);
       });
     } else {
       _clearSelection();
@@ -480,7 +501,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
   }
 
   void _onPanStart(DragStartDetails details) {
-    _log.finer('_onPanStart()');
+    _log.fine("User started pan");
     _dragStartInViewport = details.localPosition;
     _dragStartInText = _getTextOffset(_dragStartInViewport!);
 
@@ -490,13 +511,12 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
-    _log.finer('_onPanUpdate()');
+    _log.finer("User moved during pan");
     setState(() {
       _dragEndInViewport = details.localPosition;
       _dragEndInText = _getTextOffset(_dragEndInViewport!);
       _dragRectInViewport = Rect.fromPoints(_dragStartInViewport!, _dragEndInViewport!);
       _log.finer('_onPanUpdate - drag rect: $_dragRectInViewport');
-      _updateCursorStyle(details.localPosition);
       _updateDragSelection();
 
       _scrollIfNearBoundary();
@@ -504,6 +524,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
   }
 
   void _onPanEnd(DragEndDetails details) {
+    _log.finer("User ended a pan");
     setState(() {
       _dragStartInText = null;
       _dragEndInText = null;
@@ -515,6 +536,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
   }
 
   void _onPanCancel() {
+    _log.finer("User cancelled a pan");
     setState(() {
       _dragStartInText = null;
       _dragEndInText = null;
@@ -545,8 +567,8 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
           affinity,
         );
       } else if (_selectionType == _SelectionType.word) {
-        final baseParagraphSelection = _text.getWordSelectionAt(TextPosition(offset: startDragOffset));
-        final extentParagraphSelection = _text.getWordSelectionAt(TextPosition(offset: endDragOffset));
+        final baseParagraphSelection = _textLayout.getWordSelectionAt(TextPosition(offset: startDragOffset));
+        final extentParagraphSelection = _textLayout.getWordSelectionAt(TextPosition(offset: endDragOffset));
 
         widget.textController.selection = _combineSelections(
           baseParagraphSelection,
@@ -582,10 +604,6 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
     setState(() {
       widget.textController.selection = const TextSelection.collapsed(offset: -1);
     });
-  }
-
-  void _onMouseMove(PointerEvent pointerEvent) {
-    _updateCursorStyle(pointerEvent.localPosition);
   }
 
   /// We prevent SingleChildScrollView from processing mouse events because
@@ -637,11 +655,14 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
 
     if (_dragEndInViewport!.dy < _dragGutterExtent) {
       _startScrollingToStart();
+      return;
     } else {
       _stopScrollingToStart();
     }
+
     if (editorBox.size.height - _dragEndInViewport!.dy < _dragGutterExtent) {
       _startScrollingToEnd();
+      return;
     } else {
       _stopScrollingToEnd();
     }
@@ -656,7 +677,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
 
     final gutterAmount = _dragEndInViewport!.dy.clamp(0.0, _dragGutterExtent);
     final speedPercent = 1.0 - (gutterAmount / _dragGutterExtent);
-    final scrollAmount = lerpDouble(0, _maxDragSpeed, speedPercent)!;
+    final scrollAmount = ui.lerpDouble(0, _maxDragSpeed, speedPercent)!;
 
     _textScroll.startScrollingToStart(amountPerFrame: scrollAmount);
   }
@@ -675,7 +696,7 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
     final editorBox = context.findRenderObject() as RenderBox;
     final gutterAmount = (editorBox.size.height - _dragEndInViewport!.dy).clamp(0.0, _dragGutterExtent);
     final speedPercent = 1.0 - (gutterAmount / _dragGutterExtent);
-    final scrollAmount = lerpDouble(0, _maxDragSpeed, speedPercent)!;
+    final scrollAmount = ui.lerpDouble(0, _maxDragSpeed, speedPercent)!;
 
     _textScroll.startScrollingToEnd(amountPerFrame: scrollAmount);
   }
@@ -684,32 +705,19 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
     _textScroll.stopScrollingToEnd();
   }
 
-  void _updateCursorStyle(Offset cursorOffset) {
-    if (_isTextAtOffset(cursorOffset)) {
-      _cursorStyle.value = SystemMouseCursors.text;
-    } else {
-      _cursorStyle.value = SystemMouseCursors.basic;
-    }
-  }
-
   TextPosition? _getPositionAtOffset(Offset textFieldOffset) {
     final textOffset = _getTextOffset(textFieldOffset);
     final textBox = widget.textKey.currentContext!.findRenderObject() as RenderBox;
 
-    return textBox.size.contains(textOffset) ? widget.textKey.currentState!.getPositionAtOffset(textOffset) : null;
+    return textBox.size.contains(textOffset) ? _textLayout.getPositionAtOffset(textOffset) : null;
   }
 
   TextSelection _getParagraphSelectionAt(TextPosition textPosition, TextAffinity affinity) {
-    return _text.expandSelection(textPosition, paragraphExpansionFilter, affinity);
+    return _textLayout.expandSelection(textPosition, paragraphExpansionFilter, affinity);
   }
 
   TextPosition _getPositionNearestToTextOffset(Offset textOffset) {
-    return widget.textKey.currentState!.getPositionAtOffset(textOffset);
-  }
-
-  bool _isTextAtOffset(Offset textFieldOffset) {
-    final textOffset = _getTextOffset(textFieldOffset);
-    return widget.textKey.currentState!.isTextAtOffset(textOffset);
+    return _textLayout.getPositionNearestToOffset(textOffset);
   }
 
   Offset _getTextOffset(Offset textFieldOffset) {
@@ -722,7 +730,6 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
   Widget build(BuildContext context) {
     return Listener(
       onPointerSignal: _onPointerSignal,
-      onPointerHover: _onMouseMove,
       child: GestureDetector(
         onSecondaryTapUp: _onRightClick,
         child: RawGestureDetector(
@@ -750,14 +757,9 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
               },
             ),
           },
-          child: ListenableBuilder(
-            listenable: _cursorStyle,
-            builder: (context) {
-              return MouseRegion(
-                cursor: _cursorStyle.value,
-                child: widget.child,
-              );
-            },
+          child: MouseRegion(
+            cursor: SystemMouseCursors.text,
+            child: widget.child,
           ),
         ),
       ),
@@ -772,7 +774,11 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
 /// is defined on its own so that it can be replaced with a widget that handles
 /// key events differently.
 ///
-/// The key events are applied to a [SuperSelectableText] widget that is tied to [textKey].
+/// The key events are passed down the [keyboardActions] Chain of Responsibility.
+/// Each handler is given a reference to the [textController], to manipulate the
+/// text content, and a [TextLayout] via the [textKey], which can be used to make
+/// decisions about manipulations, such as moving the caret to the beginning/end
+/// of a line.
 class SuperTextFieldKeyboardInteractor extends StatefulWidget {
   const SuperTextFieldKeyboardInteractor({
     Key? key,
@@ -790,8 +796,8 @@ class SuperTextFieldKeyboardInteractor extends StatefulWidget {
   final AttributedTextEditingController textController;
 
   /// [GlobalKey] that links this [SuperTextFieldGestureInteractor] to
-  /// the [SuperSelectableText] widget that paints the text for this text field.
-  final GlobalKey<SuperSelectableTextState> textKey;
+  /// the [ProseTextLayout] widget that paints the text for this text field.
+  final GlobalKey<ProseTextState> textKey;
 
   /// Ordered list of actions that correspond to various key events.
   ///
@@ -819,34 +825,35 @@ class SuperTextFieldKeyboardInteractor extends StatefulWidget {
   final Widget child;
 
   @override
-  _SuperTextFieldKeyboardInteractorState createState() => _SuperTextFieldKeyboardInteractorState();
+  State createState() => _SuperTextFieldKeyboardInteractorState();
 }
 
 class _SuperTextFieldKeyboardInteractorState extends State<SuperTextFieldKeyboardInteractor> {
   KeyEventResult _onKeyPressed(FocusNode focusNode, RawKeyEvent keyEvent) {
-    _log.finer('_onKeyPressed - keyEvent: ${keyEvent.character}');
+    _log.fine('_onKeyPressed - keyEvent: ${keyEvent.logicalKey}, character: ${keyEvent.character}');
     if (keyEvent is! RawKeyDownEvent) {
       _log.finer('_onKeyPressed - not a "down" event. Ignoring.');
       return KeyEventResult.ignored;
     }
 
-    TextFieldKeyboardHandlerResult instruction = TextFieldKeyboardHandlerResult.notHandled;
+    TextFieldKeyboardHandlerResult result = TextFieldKeyboardHandlerResult.notHandled;
     int index = 0;
-    while (instruction == TextFieldKeyboardHandlerResult.notHandled && index < widget.keyboardActions.length) {
-      instruction = widget.keyboardActions[index](
+    while (result == TextFieldKeyboardHandlerResult.notHandled && index < widget.keyboardActions.length) {
+      result = widget.keyboardActions[index](
         controller: widget.textController,
-        selectableTextState: widget.textKey.currentState!,
+        textLayout: widget.textKey.currentState!.textLayout,
         keyEvent: keyEvent,
       );
       index += 1;
     }
 
-    return instruction == TextFieldKeyboardHandlerResult.handled ? KeyEventResult.handled : KeyEventResult.ignored;
+    _log.finest("Key handler result: $result");
+    return result == TextFieldKeyboardHandlerResult.handled ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
+    return NonReparentingFocus(
       focusNode: widget.focusNode,
       onKey: _onKeyPressed,
       child: widget.child,
@@ -873,6 +880,7 @@ class SuperTextFieldScrollview extends StatefulWidget {
     required this.viewportHeight,
     required this.estimatedLineHeight,
     required this.isMultiline,
+    this.textAlign = TextAlign.left,
     required this.child,
   }) : super(key: key);
 
@@ -880,8 +888,8 @@ class SuperTextFieldScrollview extends StatefulWidget {
   final AttributedTextEditingController textController;
 
   /// [GlobalKey] that links this [SuperTextFieldScrollview] to
-  /// the [SuperSelectableText] widget that paints the text for this text field.
-  final GlobalKey<SuperSelectableTextState> textKey;
+  /// the [ProseTextLayout] widget that paints the text for this text field.
+  final GlobalKey<ProseTextState> textKey;
 
   /// [ScrollController] that controls the scroll offset of this [SuperTextFieldScrollview].
   final ScrollController scrollController;
@@ -901,6 +909,9 @@ class SuperTextFieldScrollview extends StatefulWidget {
 
   /// Whether or not this text field allows multiple lines of text.
   final bool isMultiline;
+
+  /// The text alignment within the scrollview.
+  final TextAlign textAlign;
 
   /// The rest of the subtree for this text field.
   final Widget child;
@@ -935,7 +946,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
     if (widget.viewportHeight != oldWidget.viewportHeight) {
       // After the current layout, ensure that the current text
       // selection is visible.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         if (mounted) {
           _ensureSelectionExtentIsVisible();
         }
@@ -949,13 +960,13 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
     super.dispose();
   }
 
-  SuperSelectableTextState get _text => widget.textKey.currentState!;
+  ProseTextLayout get _textLayout => widget.textKey.currentState!.textLayout;
 
   void _onSelectionOrContentChange() {
     // Use a post-frame callback to "ensure selection extent is visible"
     // so that any pending visual content changes can happen before
     // attempting to calculate the visual position of the selection extent.
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (mounted) {
         _ensureSelectionExtentIsVisible();
       }
@@ -976,7 +987,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
       return;
     }
 
-    final extentOffset = _text.getOffsetAtPosition(selection.extent);
+    final extentOffset = _textLayout.getOffsetAtPosition(selection.extent);
 
     const gutterExtent = 0; // _dragGutterExtent
 
@@ -1013,7 +1024,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
       return;
     }
 
-    final extentOffset = _text.getOffsetAtPosition(selection.extent);
+    final extentOffset = _textLayout.getOffsetAtPosition(selection.extent);
 
     const gutterExtent = 0; // _dragGutterExtent
     final extentLineIndex = (extentOffset.dy / widget.estimatedLineHeight).round();
@@ -1066,6 +1077,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
     }
 
     _scrollToStartOnTick = true;
+    _log.finer("Starting Ticker to auto-scroll up");
     _ticker.start();
   }
 
@@ -1076,6 +1088,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
 
     _scrollToStartOnTick = false;
     _scrollAmountPerFrame = 0;
+    _log.finer("Stopping Ticker after auto-scroll up");
     _ticker.stop();
   }
 
@@ -1096,6 +1109,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
     }
 
     _scrollToEndOnTick = true;
+    _log.finer("Starting Ticker to auto-scroll down");
     _ticker.start();
   }
 
@@ -1106,6 +1120,7 @@ class SuperTextFieldScrollviewState extends State<SuperTextFieldScrollview> with
 
     _scrollToEndOnTick = false;
     _scrollAmountPerFrame = 0;
+    _log.finer("Stopping Ticker after auto-scroll down");
     _ticker.stop();
   }
 
@@ -1190,9 +1205,26 @@ enum TextFieldKeyboardHandlerResult {
 
 typedef TextFieldKeyboardHandler = TextFieldKeyboardHandlerResult Function({
   required AttributedTextEditingController controller,
-  required SuperSelectableTextState selectableTextState,
+  required ProseTextLayout textLayout,
   required RawKeyEvent keyEvent,
 });
+
+/// A [TextFieldKeyboardHandler] that reports [TextFieldKeyboardHandlerResult.blocked]
+/// for any key combination that matches one of the given [keys].
+TextFieldKeyboardHandler ignoreTextFieldKeyCombos(List<ShortcutActivator> keys) {
+  return ({
+    required AttributedTextEditingController controller,
+    required ProseTextLayout textLayout,
+    required RawKeyEvent keyEvent,
+  }) {
+    for (final key in keys) {
+      if (key.accepts(keyEvent, RawKeyboard.instance)) {
+        return TextFieldKeyboardHandlerResult.blocked;
+      }
+    }
+    return TextFieldKeyboardHandlerResult.notHandled;
+  };
+}
 
 /// The keyboard actions that a [SuperTextField] uses by default.
 ///
@@ -1213,7 +1245,12 @@ const defaultTextFieldKeyboardHandlers = <TextFieldKeyboardHandler>[
   DefaultSuperTextFieldKeyboardHandlers.copyTextWhenCmdCIsPressed,
   DefaultSuperTextFieldKeyboardHandlers.pasteTextWhenCmdVIsPressed,
   DefaultSuperTextFieldKeyboardHandlers.selectAllTextFieldWhenCmdAIsPressed,
+  DefaultSuperTextFieldKeyboardHandlers.moveCaretToStartOrEnd,
   DefaultSuperTextFieldKeyboardHandlers.moveUpDownLeftAndRightWithArrowKeys,
+  DefaultSuperTextFieldKeyboardHandlers.moveToLineStartWithHome,
+  DefaultSuperTextFieldKeyboardHandlers.moveToLineEndWithEnd,
+  DefaultSuperTextFieldKeyboardHandlers.deleteWordWhenAltBackSpaceIsPressedOnMac,
+  DefaultSuperTextFieldKeyboardHandlers.deleteWordWhenCtlBackSpaceIsPressedOnWindowsAndLinux,
   DefaultSuperTextFieldKeyboardHandlers.deleteTextOnLineBeforeCaretWhenShortcutKeyAndBackspaceIsPressed,
   DefaultSuperTextFieldKeyboardHandlers.deleteTextWhenBackspaceOrDeleteIsPressed,
   DefaultSuperTextFieldKeyboardHandlers.insertNewlineWhenEnterIsPressed,
@@ -1221,9 +1258,11 @@ const defaultTextFieldKeyboardHandlers = <TextFieldKeyboardHandler>[
 ];
 
 class DefaultSuperTextFieldKeyboardHandlers {
+  /// [copyTextWhenCmdCIsPressed] copies text to clipboard when primary shortcut key
+  /// (CMD on Mac, CTL on Windows) + C is pressed.
   static TextFieldKeyboardHandlerResult copyTextWhenCmdCIsPressed({
     required AttributedTextEditingController controller,
-    SuperSelectableTextState? selectableTextState,
+    ProseTextLayout? textLayout,
     required RawKeyEvent keyEvent,
   }) {
     if (!keyEvent.isPrimaryShortcutKeyPressed) {
@@ -1232,21 +1271,29 @@ class DefaultSuperTextFieldKeyboardHandlers {
     if (keyEvent.logicalKey != LogicalKeyboardKey.keyC) {
       return TextFieldKeyboardHandlerResult.notHandled;
     }
+    if (controller.selection.extentOffset == -1) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
 
     controller.copySelectedTextToClipboard();
 
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  /// [pasteTextWhenCmdVIsPressed] pastes text from clipboard to document when primary shortcut key
+  /// (CMD on Mac, CTL on Windows) + V is pressed.
   static TextFieldKeyboardHandlerResult pasteTextWhenCmdVIsPressed({
     required AttributedTextEditingController controller,
-    SuperSelectableTextState? selectableTextState,
+    ProseTextLayout? textLayout,
     required RawKeyEvent keyEvent,
   }) {
     if (!keyEvent.isPrimaryShortcutKeyPressed) {
       return TextFieldKeyboardHandlerResult.notHandled;
     }
     if (keyEvent.logicalKey != LogicalKeyboardKey.keyV) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+    if (controller.selection.extentOffset == -1) {
       return TextFieldKeyboardHandlerResult.notHandled;
     }
 
@@ -1259,9 +1306,11 @@ class DefaultSuperTextFieldKeyboardHandlers {
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  /// [selectAllTextFieldWhenCmdAIsPressed] selects all text when primary shortcut key
+  /// (CMD on Mac, CTL on Windows) + A is pressed.
   static TextFieldKeyboardHandlerResult selectAllTextFieldWhenCmdAIsPressed({
     required AttributedTextEditingController controller,
-    SuperSelectableTextState? selectableTextState,
+    ProseTextLayout? textLayout,
     required RawKeyEvent keyEvent,
   }) {
     if (!keyEvent.isPrimaryShortcutKeyPressed) {
@@ -1276,9 +1325,48 @@ class DefaultSuperTextFieldKeyboardHandlers {
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  /// [moveCaretToStartOrEnd] moves caret to start (using CTL+A) or end of line (using CTL+E)
+  /// on MacOS platforms. This is part of expected behavior on MacOS. Not applicable to Windows.
+  static TextFieldKeyboardHandlerResult moveCaretToStartOrEnd({
+    required AttributedTextEditingController controller,
+    ProseTextLayout? textLayout,
+    required RawKeyEvent keyEvent,
+  }) {
+    bool moveLeft = false;
+    if (!keyEvent.isControlPressed) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+    if (defaultTargetPlatform != TargetPlatform.macOS) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+    if (keyEvent.logicalKey != LogicalKeyboardKey.keyA && keyEvent.logicalKey != LogicalKeyboardKey.keyE) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+    if (controller.selection.extentOffset == -1) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    keyEvent.logicalKey == LogicalKeyboardKey.keyA
+        ? moveLeft = true
+        : keyEvent.logicalKey == LogicalKeyboardKey.keyE
+            ? moveLeft = false
+            : null;
+
+    controller.moveCaretHorizontally(
+      textLayout: textLayout!,
+      expandSelection: false,
+      moveLeft: moveLeft,
+      movementModifier: MovementModifier.line,
+    );
+
+    return TextFieldKeyboardHandlerResult.handled;
+  }
+
+  /// [moveUpDownLeftAndRightWithArrowKeys] moves caret according to the directional key which was pressed.
+  /// If there is no caret selection. it does nothing.
   static TextFieldKeyboardHandlerResult moveUpDownLeftAndRightWithArrowKeys({
     required AttributedTextEditingController controller,
-    required SuperSelectableTextState selectableTextState,
+    required ProseTextLayout textLayout,
     required RawKeyEvent keyEvent,
   }) {
     const arrowKeys = [
@@ -1297,53 +1385,65 @@ class DefaultSuperTextFieldKeyboardHandlers {
       return TextFieldKeyboardHandlerResult.handled;
     }
 
+    if (defaultTargetPlatform == TargetPlatform.windows && keyEvent.isAltPressed) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    if (defaultTargetPlatform == TargetPlatform.linux &&
+        keyEvent.isAltPressed &&
+        (keyEvent.logicalKey == LogicalKeyboardKey.arrowUp || keyEvent.logicalKey == LogicalKeyboardKey.arrowDown)) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
     if (keyEvent.logicalKey == LogicalKeyboardKey.arrowLeft) {
       _log.finer('moveUpDownLeftAndRightWithArrowKeys - handling left arrow key');
 
-      final movementModifiers = <String, dynamic>{
-        'movement_unit': 'character',
-      };
-      if (keyEvent.isPrimaryShortcutKeyPressed) {
-        movementModifiers['movement_unit'] = 'line';
-      } else if (keyEvent.isAltPressed) {
-        movementModifiers['movement_unit'] = 'word';
+      MovementModifier? movementModifier;
+      if ((defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.linux) &&
+          keyEvent.isControlPressed) {
+        movementModifier = MovementModifier.word;
+      } else if (defaultTargetPlatform == TargetPlatform.macOS && keyEvent.isMetaPressed) {
+        movementModifier = MovementModifier.line;
+      } else if (defaultTargetPlatform == TargetPlatform.macOS && keyEvent.isAltPressed) {
+        movementModifier = MovementModifier.word;
       }
 
       controller.moveCaretHorizontally(
-        selectableTextState: selectableTextState,
+        textLayout: textLayout,
         expandSelection: keyEvent.isShiftPressed,
         moveLeft: true,
-        movementModifiers: movementModifiers,
+        movementModifier: movementModifier,
       );
     } else if (keyEvent.logicalKey == LogicalKeyboardKey.arrowRight) {
       _log.finer('moveUpDownLeftAndRightWithArrowKeys - handling right arrow key');
 
-      final movementModifiers = <String, dynamic>{
-        'movement_unit': 'character',
-      };
-      if (keyEvent.isPrimaryShortcutKeyPressed) {
-        movementModifiers['movement_unit'] = 'line';
-      } else if (keyEvent.isAltPressed) {
-        movementModifiers['movement_unit'] = 'word';
+      MovementModifier? movementModifier;
+      if ((defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.linux) &&
+          keyEvent.isControlPressed) {
+        movementModifier = MovementModifier.word;
+      } else if (defaultTargetPlatform == TargetPlatform.macOS && keyEvent.isMetaPressed) {
+        movementModifier = MovementModifier.line;
+      } else if (defaultTargetPlatform == TargetPlatform.macOS && keyEvent.isAltPressed) {
+        movementModifier = MovementModifier.word;
       }
 
       controller.moveCaretHorizontally(
-        selectableTextState: selectableTextState,
+        textLayout: textLayout,
         expandSelection: keyEvent.isShiftPressed,
         moveLeft: false,
-        movementModifiers: movementModifiers,
+        movementModifier: movementModifier,
       );
     } else if (keyEvent.logicalKey == LogicalKeyboardKey.arrowUp) {
       _log.finer('moveUpDownLeftAndRightWithArrowKeys - handling up arrow key');
       controller.moveCaretVertically(
-        selectableTextState: selectableTextState,
+        textLayout: textLayout,
         expandSelection: keyEvent.isShiftPressed,
         moveUp: true,
       );
     } else if (keyEvent.logicalKey == LogicalKeyboardKey.arrowDown) {
       _log.finer('moveUpDownLeftAndRightWithArrowKeys - handling down arrow key');
       controller.moveCaretVertically(
-        selectableTextState: selectableTextState,
+        textLayout: textLayout,
         expandSelection: keyEvent.isShiftPressed,
         moveUp: false,
       );
@@ -1352,9 +1452,56 @@ class DefaultSuperTextFieldKeyboardHandlers {
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  static TextFieldKeyboardHandlerResult moveToLineStartWithHome({
+    required AttributedTextEditingController controller,
+    required ProseTextLayout textLayout,
+    required RawKeyEvent keyEvent,
+  }) {
+    if (defaultTargetPlatform != TargetPlatform.windows && defaultTargetPlatform != TargetPlatform.linux) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    if (keyEvent.logicalKey == LogicalKeyboardKey.home) {
+      controller.moveCaretHorizontally(
+        textLayout: textLayout,
+        expandSelection: keyEvent.isShiftPressed,
+        moveLeft: true,
+        movementModifier: MovementModifier.line,
+      );
+      return TextFieldKeyboardHandlerResult.handled;
+    }
+
+    return TextFieldKeyboardHandlerResult.notHandled;
+  }
+
+  static TextFieldKeyboardHandlerResult moveToLineEndWithEnd({
+    required AttributedTextEditingController controller,
+    required ProseTextLayout textLayout,
+    required RawKeyEvent keyEvent,
+  }) {
+    if (defaultTargetPlatform != TargetPlatform.windows && defaultTargetPlatform != TargetPlatform.linux) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    if (keyEvent.logicalKey == LogicalKeyboardKey.end) {
+      controller.moveCaretHorizontally(
+        textLayout: textLayout,
+        expandSelection: keyEvent.isShiftPressed,
+        moveLeft: false,
+        movementModifier: MovementModifier.line,
+      );
+      return TextFieldKeyboardHandlerResult.handled;
+    }
+
+    return TextFieldKeyboardHandlerResult.notHandled;
+  }
+
+  /// [insertCharacterWhenKeyIsPressed] adds any character when that key is pressed.
+  /// Certain keys are currently checked against a blacklist of characters for web
+  /// since their behavior is unexpected. Check definition for more details.
   static TextFieldKeyboardHandlerResult insertCharacterWhenKeyIsPressed({
     required AttributedTextEditingController controller,
-    SuperSelectableTextState? selectableTextState,
+    ProseTextLayout? textLayout,
     required RawKeyEvent keyEvent,
   }) {
     if (keyEvent.isMetaPressed || keyEvent.isControlPressed) {
@@ -1376,7 +1523,7 @@ class DefaultSuperTextFieldKeyboardHandlers {
     // catch any key that isn't explicitly listed. The eventual solution
     // to this is for the web to honor the standard key event contract,
     // but that's out of our control.
-    if (kIsWeb && webBugBlacklistCharacters.contains(keyEvent.character)) {
+    if (isKeyEventCharacterBlacklisted(keyEvent.character)) {
       return TextFieldKeyboardHandlerResult.notHandled;
     }
 
@@ -1385,33 +1532,41 @@ class DefaultSuperTextFieldKeyboardHandlers {
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  /// Deletes text between the beginning of the line and the caret, when the user
+  /// presses CMD + Backspace, or CTL + Backspace.
   static TextFieldKeyboardHandlerResult deleteTextOnLineBeforeCaretWhenShortcutKeyAndBackspaceIsPressed({
     required AttributedTextEditingController controller,
-    required SuperSelectableTextState selectableTextState,
+    required ProseTextLayout textLayout,
     required RawKeyEvent keyEvent,
   }) {
     if (!keyEvent.isPrimaryShortcutKeyPressed || keyEvent.logicalKey != LogicalKeyboardKey.backspace) {
       return TextFieldKeyboardHandlerResult.notHandled;
     }
-    if (!controller.selection.isCollapsed) {
-      return TextFieldKeyboardHandlerResult.notHandled;
-    }
     if (controller.selection.extentOffset < 0) {
       return TextFieldKeyboardHandlerResult.notHandled;
     }
-    if (selectableTextState.getPositionAtStartOfLine(controller.selection.extent).offset ==
-        controller.selection.extentOffset) {
-      return TextFieldKeyboardHandlerResult.notHandled;
+
+    if (!controller.selection.isCollapsed) {
+      controller.deleteSelection();
+      return TextFieldKeyboardHandlerResult.handled;
     }
 
-    controller.deleteTextOnLineBeforeCaret(selectableTextState: selectableTextState);
+    if (textLayout.getPositionAtStartOfLine(controller.selection.extent).offset == controller.selection.extentOffset) {
+      // The caret is sitting at the beginning of a line. There's nothing for us to
+      // delete upstream on this line. But we also don't want a regular BACKSPACE to
+      // run, either. Report this key combination as handled.
+      return TextFieldKeyboardHandlerResult.handled;
+    }
+
+    controller.deleteTextOnLineBeforeCaret(textLayout: textLayout);
 
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  /// [deleteTextWhenBackspaceOrDeleteIsPressed] deletes single characters when delete or backspace is pressed.
   static TextFieldKeyboardHandlerResult deleteTextWhenBackspaceOrDeleteIsPressed({
     required AttributedTextEditingController controller,
-    SuperSelectableTextState? selectableTextState,
+    ProseTextLayout? textLayout,
     required RawKeyEvent keyEvent,
   }) {
     final isBackspace = keyEvent.logicalKey == LogicalKeyboardKey.backspace;
@@ -1432,9 +1587,69 @@ class DefaultSuperTextFieldKeyboardHandlers {
     return TextFieldKeyboardHandlerResult.handled;
   }
 
+  /// [deleteWordWhenAltBackSpaceIsPressedOnMac] deletes single words when Alt+Backspace is pressed on Mac.
+  static TextFieldKeyboardHandlerResult deleteWordWhenAltBackSpaceIsPressedOnMac({
+    required AttributedTextEditingController controller,
+    required ProseTextLayout textLayout,
+    required RawKeyEvent keyEvent,
+  }) {
+    if (defaultTargetPlatform != TargetPlatform.macOS) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    if (keyEvent.logicalKey != LogicalKeyboardKey.backspace || !keyEvent.isAltPressed) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+    if (controller.selection.extentOffset < 0) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    _deleteUpstreamWord(controller, textLayout);
+
+    return TextFieldKeyboardHandlerResult.handled;
+  }
+
+  /// [deleteWordWhenAltBackSpaceIsPressedOnMac] deletes single words when Ctl+Backspace is pressed on Windows/Linux.
+  static TextFieldKeyboardHandlerResult deleteWordWhenCtlBackSpaceIsPressedOnWindowsAndLinux({
+    required AttributedTextEditingController controller,
+    required ProseTextLayout textLayout,
+    required RawKeyEvent keyEvent,
+  }) {
+    if (defaultTargetPlatform != TargetPlatform.windows && defaultTargetPlatform != TargetPlatform.linux) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    if (keyEvent.logicalKey != LogicalKeyboardKey.backspace || !keyEvent.isControlPressed) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+    if (controller.selection.extentOffset < 0) {
+      return TextFieldKeyboardHandlerResult.notHandled;
+    }
+
+    _deleteUpstreamWord(controller, textLayout);
+
+    return TextFieldKeyboardHandlerResult.handled;
+  }
+
+  static void _deleteUpstreamWord(AttributedTextEditingController controller, ProseTextLayout textLayout) {
+    if (!controller.selection.isCollapsed) {
+      controller.deleteSelectedText();
+      return;
+    }
+
+    controller.moveCaretHorizontally(
+      textLayout: textLayout,
+      expandSelection: true,
+      moveLeft: true,
+      movementModifier: MovementModifier.word,
+    );
+    controller.deleteSelectedText();
+  }
+
+  /// [insertNewlineWhenEnterIsPressed] inserts a new line character when the enter key is pressed.
   static TextFieldKeyboardHandlerResult insertNewlineWhenEnterIsPressed({
     required AttributedTextEditingController controller,
-    SuperSelectableTextState? selectableTextState,
+    ProseTextLayout? textLayout,
     required RawKeyEvent keyEvent,
   }) {
     if (keyEvent.logicalKey != LogicalKeyboardKey.enter) {
@@ -1447,5 +1662,40 @@ class DefaultSuperTextFieldKeyboardHandlers {
     controller.insertNewline();
 
     return TextFieldKeyboardHandlerResult.handled;
+  }
+
+  DefaultSuperTextFieldKeyboardHandlers._();
+}
+
+/// Computes the estimated line height of a [TextStyle].
+class _EstimatedLineHeight {
+  /// Last computed line height.
+  double? _lastLineHeight;
+
+  /// TextStyle used to compute [_lastLineHeight].
+  TextStyle? _lastComputedStyle;
+
+  /// Computes the estimated line height for the given [style].
+  ///
+  /// The height is computed by laying out a [Paragraph] with an arbitrary
+  /// character and inspecting it's height.
+  ///
+  /// The result is cached for the last [style] used, so it's not computed
+  /// at each call.
+  double calculate(TextStyle style) {
+    if (_lastComputedStyle == style && _lastLineHeight != null) {
+      return _lastLineHeight!;
+    }
+
+    final builder = ui.ParagraphBuilder(style.getParagraphStyle())
+      ..pushStyle(style.getTextStyle())
+      ..addText('A');
+
+    final paragraph = builder.build();
+    paragraph.layout(const ui.ParagraphConstraints(width: double.infinity));
+
+    _lastLineHeight = paragraph.height;
+    _lastComputedStyle = style;
+    return _lastLineHeight!;
   }
 }

@@ -48,11 +48,12 @@ class SingleColumnDocumentLayout extends StatefulWidget {
   final bool showDebugPaint;
 
   @override
-  _SingleColumnDocumentLayoutState createState() => _SingleColumnDocumentLayoutState();
+  State createState() => _SingleColumnDocumentLayoutState();
 }
 
 class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout> implements DocumentLayout {
   final Map<String, GlobalKey> _nodeIdsToComponentKeys = {};
+  final Map<GlobalKey, String> _componentKeysToNodeIds = {};
 
   // Keys are cached in top-to-bottom order so that we can visually
   // traverse components without repeatedly querying a `Document`
@@ -136,6 +137,24 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
     );
     editorLayoutLog.info('Getting document position near offset: $documentOffset');
 
+    if (_isAboveStartOfContent(documentOffset)) {
+      // The given offset is above the start of the content.
+      // Return the position at the start of the first node.
+      final firstPosition = _findFirstPosition();
+      if (firstPosition != null) {
+        return firstPosition;
+      }
+    }
+
+    if (_isBeyondDocumentEnd(documentOffset)) {
+      // The given offset is beyond the end of the content.
+      // Return the position at the end of the last node.
+      final lastPosition = _findLastPosition();
+      if (lastPosition != null) {
+        return lastPosition;
+      }
+    }
+
     final componentKey = _findComponentClosestToOffset(documentOffset);
     if (componentKey == null || componentKey.currentContext == null) {
       return null;
@@ -156,11 +175,39 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
     }
 
     final selectionAtOffset = DocumentPosition(
-      nodeId: _nodeIdsToComponentKeys.entries.firstWhere((element) => element.value == componentKey).key,
+      nodeId: _componentKeysToNodeIds[componentKey]!,
       nodePosition: componentPosition,
     );
     editorLayoutLog.info(' - selection at offset: $selectionAtOffset');
     return selectionAtOffset;
+  }
+
+  /// Returns whether or not [documentOffset] is above the start of the document's content.
+  bool _isAboveStartOfContent(Offset documentOffset) {
+    if (_topToBottomComponentKeys.isEmpty) {
+      // There is no component in the document.
+      return true;
+    }
+
+    final componentKey = _topToBottomComponentKeys.first;
+    final componentBox = componentKey.currentContext!.findRenderObject() as RenderBox;
+    final offsetAtComponent = _componentOffset(componentBox, documentOffset);
+
+    return offsetAtComponent.dy < 0.0;
+  }
+
+  /// Returns whether or not [documentOffset] is beyond the end of the document.
+  bool _isBeyondDocumentEnd(Offset documentOffset) {
+    if (_topToBottomComponentKeys.isEmpty) {
+      // There is no component in the document.
+      return true;
+    }
+
+    final componentKey = _topToBottomComponentKeys.last;
+    final componentBox = componentKey.currentContext!.findRenderObject() as RenderBox;
+    final offsetAtComponent = _componentOffset(componentBox, documentOffset);
+
+    return offsetAtComponent.dy > componentBox.size.height;
   }
 
   @override
@@ -254,21 +301,12 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
     final bottomNodeIndex = topNodeIndex == baseComponentIndex ? extentComponentIndex : baseComponentIndex;
     final componentsInside = _topToBottomComponentKeys.sublist(topNodeIndex, bottomNodeIndex + 1);
 
-    return componentsInside.map((componentKey) {
-      return _nodeIdsToComponentKeys.entries.firstWhere((entry) {
-        return entry.value == componentKey;
-      }).key;
-    }).toList();
+    return componentsInside.map((componentKey) => _componentKeysToNodeIds[componentKey]!).toList();
   }
 
   @override
   DocumentSelection? getDocumentSelectionInRegion(Offset baseOffset, Offset extentOffset) {
     editorLayoutLog.info('getDocumentSelectionInRegion() - from: $baseOffset, to: $extentOffset');
-    // Drag direction determines whether the extent offset is at the
-    // top or bottom of the drag rect.
-    // TODO: this condition is wrong when the user is dragging within a single line of text (#50)
-    final isDraggingDown = baseOffset.dy < extentOffset.dy;
-
     final region = Rect.fromPoints(baseOffset, extentOffset);
 
     String? topNodeId;
@@ -279,7 +317,13 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
     dynamic bottomNodeBasePosition;
     dynamic bottomNodeExtentPosition;
 
-    for (final componentKey in _topToBottomComponentKeys) {
+    // Find the top and bottom nodes in the selection region. We do this by finding the component
+    // at the top of the selection, then we iterate down the document until we find the bottom
+    // component in the selection region. We obtain the document nodes from the components.
+    final selectionRegionTopOffset = min(baseOffset.dy, extentOffset.dy);
+    final componentSearchStartIndex = max(_findComponentIndexAtOffset(selectionRegionTopOffset), 0);
+    for (int i = componentSearchStartIndex; i < _topToBottomComponentKeys.length; i++) {
+      final componentKey = _topToBottomComponentKeys[i];
       editorLayoutLog.info(' - considering component "$componentKey"');
       if (componentKey.currentState is! DocumentComponent) {
         editorLayoutLog.info(' - found unknown component: ${componentKey.currentState}');
@@ -288,45 +332,64 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
 
       final component = componentKey.currentState as DocumentComponent;
 
+      // Unselectable components should be avoided at base or extent.
+      // They should only be selected when the surrounding components are selected.
+      if (!component.isVisualSelectionSupported()) {
+        editorLayoutLog.fine(' - component does not allow visual selection. Moving on.');
+        continue;
+      }
+
       final componentOverlap = _getLocalOverlapWithComponent(region, component);
 
       if (componentOverlap != null) {
-        editorLayoutLog.info(' - drag intersects: $componentKey}');
-        editorLayoutLog.info(' - intersection: $componentOverlap');
+        editorLayoutLog.fine(' - drag intersects: $componentKey}');
+        editorLayoutLog.fine(' - intersection: $componentOverlap');
         final componentBaseOffset = _componentOffset(
           componentKey.currentContext!.findRenderObject() as RenderBox,
           baseOffset,
         );
+        editorLayoutLog.fine(' - base component offset: $componentBaseOffset');
         final componentExtentOffset = _componentOffset(
           componentKey.currentContext!.findRenderObject() as RenderBox,
           extentOffset,
         );
+        editorLayoutLog.fine(' - extent component offset: $componentExtentOffset');
 
         if (topNodeId == null) {
           // Because we're iterating through components from top to bottom, the
           // first intersecting component that we find must be the top node of
           // the selected area.
-          topNodeId = _nodeIdsToComponentKeys.entries.firstWhere((element) => element.value == componentKey).key;
-          topNodeBasePosition = component.getPositionAtOffset(componentBaseOffset);
-          topNodeExtentPosition = component.getPositionAtOffset(componentExtentOffset);
+          topNodeId = _componentKeysToNodeIds[componentKey];
+          topNodeBasePosition = _getNodePositionForComponentOffset(component, componentBaseOffset);
+          topNodeExtentPosition = _getNodePositionForComponentOffset(component, componentExtentOffset);
         }
         // We continuously update the bottom node with every additional
         // intersection that we find. This way, when the iteration ends,
         // the last bottom node that we assigned must be the actual bottom
         // node within the selected area.
-        bottomNodeId = _nodeIdsToComponentKeys.entries.firstWhere((element) => element.value == componentKey).key;
-        bottomNodeBasePosition = component.getPositionAtOffset(componentBaseOffset);
-        bottomNodeExtentPosition = component.getPositionAtOffset(componentExtentOffset);
+        bottomNodeId = _componentKeysToNodeIds[componentKey];
+        bottomNodeBasePosition = _getNodePositionForComponentOffset(component, componentBaseOffset);
+        bottomNodeExtentPosition = _getNodePositionForComponentOffset(component, componentExtentOffset);
+      } else if (topNodeId != null) {
+        // We already found an overlapping component and the current component doesn't
+        // overlap with the region.
+        // Because we're iterating through components from top to bottom,
+        // it means that there isn't any other component which will overlap,
+        // so we can skip the rest of the list.
+        break;
       }
     }
 
     if (topNodeId == null || bottomNodeId == null) {
       // No document content exists in the given region.
+      editorLayoutLog
+          .finer(' - no document content exists in the region. Node at top: $topNodeId. Node at bottom: $bottomNodeId');
       return null;
     }
 
     if (topNodeId == bottomNodeId) {
       // Region sits within a single component.
+      editorLayoutLog.fine(' - the entire selection sits within a single node: $topNodeId');
       return DocumentSelection(
         base: DocumentPosition(
           nodeId: topNodeId,
@@ -339,6 +402,12 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
       );
     } else {
       // Region covers multiple components.
+      editorLayoutLog.fine(' - the selection spans nodes: $topNodeId -> $bottomNodeId');
+
+      // Drag direction determines whether the extent offset is at the
+      // top or bottom of the drag rect.
+      final isDraggingDown = baseOffset.dy < extentOffset.dy;
+
       return DocumentSelection(
         base: DocumentPosition(
           nodeId: isDraggingDown ? topNodeId : bottomNodeId,
@@ -367,6 +436,22 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
     } else {
       return null;
     }
+  }
+
+  /// Returns the [NodePosition] that sits at the given [componentOffset].
+  ///
+  /// If the [componentOffset] is above the component, then the component's
+  /// "beginning" position is returned. If the [componentOffset] is below
+  /// the component, then the component's "end" position is returned.
+  NodePosition? _getNodePositionForComponentOffset(DocumentComponent component, Offset componentOffset) {
+    if (componentOffset.dy < 0) {
+      return component.getBeginningPosition();
+    }
+    if (componentOffset.dy > component.getRectForPosition(component.getEndPosition()).bottom) {
+      return component.getEndPosition();
+    }
+
+    return component.getPositionAtOffset(componentOffset);
   }
 
   @override
@@ -427,6 +512,36 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
     return nearestComponentKey;
   }
 
+  /// Returns the [DocumentPosition] at the beginning of the first node or `null` if the document is empty.
+  DocumentPosition? _findFirstPosition() {
+    if (_topToBottomComponentKeys.isEmpty) {
+      return null;
+    }
+
+    final componentKey = _topToBottomComponentKeys.first;
+    final component = componentKey.currentState as DocumentComponent;
+
+    return DocumentPosition(
+      nodeId: _componentKeysToNodeIds[componentKey]!,
+      nodePosition: component.getBeginningPosition(),
+    );
+  }
+
+  /// Returns the [DocumentPosition] at the end of the last node or `null` if the document is empty.
+  DocumentPosition? _findLastPosition() {
+    if (_topToBottomComponentKeys.isEmpty) {
+      return null;
+    }
+
+    final componentKey = _topToBottomComponentKeys.last;
+    final component = componentKey.currentState as DocumentComponent;
+
+    return DocumentPosition(
+      nodeId: _componentKeysToNodeIds[componentKey]!,
+      nodePosition: component.getEndPosition(),
+    );
+  }
+
   bool _isOffsetInComponent(RenderBox componentBox, Offset documentOffset) {
     final containerBox = context.findRenderObject() as RenderBox;
     final contentOffset = componentBox.localToGlobal(Offset.zero, ancestor: containerBox);
@@ -482,18 +597,44 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
   }
 
   @override
-  Offset getDocumentOffsetFromAncestorOffset(Offset ancestorOffset, RenderObject ancestor) {
+  Offset getDocumentOffsetFromAncestorOffset(Offset ancestorOffset, [RenderObject? ancestor]) {
     return (context.findRenderObject() as RenderBox).globalToLocal(ancestorOffset, ancestor: ancestor);
   }
 
   @override
-  Offset getAncestorOffsetFromDocumentOffset(Offset documentOffset, RenderObject ancestor) {
+  Offset getAncestorOffsetFromDocumentOffset(Offset documentOffset, [RenderObject? ancestor]) {
     return (context.findRenderObject() as RenderBox).localToGlobal(documentOffset, ancestor: ancestor);
   }
 
   @override
   Offset getGlobalOffsetFromDocumentOffset(Offset documentOffset) {
     return (context.findRenderObject() as RenderBox).localToGlobal(documentOffset);
+  }
+
+  @override
+  DocumentPosition? findLastSelectablePosition() {
+    NodePosition? nodePosition;
+    String? nodeId;
+
+    for (int i = _topToBottomComponentKeys.length - 1; i >= 0; i--) {
+      final componentKey = _topToBottomComponentKeys[i];
+      final component = componentKey.currentState as DocumentComponent;
+
+      if (component.isVisualSelectionSupported()) {
+        nodePosition = component.getEndPosition();
+        nodeId = _componentKeysToNodeIds[componentKey];
+        break;
+      }
+    }
+
+    if (nodePosition == null) {
+      return null;
+    }
+
+    return DocumentPosition(
+      nodeId: nodeId!,
+      nodePosition: nodePosition,
+    );
   }
 
   @override
@@ -514,6 +655,7 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
 
     final docComponents = <Widget>[];
     final newComponentKeys = <String, GlobalKey>{};
+    final newNodeIds = <GlobalKey, String>{};
     _topToBottomComponentKeys.clear();
 
     final viewModel = widget.presenter.viewModel;
@@ -523,6 +665,7 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
         newComponentKeyMap: newComponentKeys,
         nodeId: componentViewModel.nodeId,
       );
+      newNodeIds[componentKey] = componentViewModel.nodeId;
       editorLayoutLog.finer('Node -> Key: ${componentViewModel.nodeId} -> $componentKey');
 
       _topToBottomComponentKeys.add(componentKey);
@@ -549,6 +692,10 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
       ..clear()
       ..addAll(newComponentKeys);
 
+    _componentKeysToNodeIds
+      ..clear()
+      ..addAll(newNodeIds);
+
     editorLayoutLog.finer(' - keys -> IDs after building all components:');
     _nodeIdsToComponentKeys.forEach((key, value) {
       editorLayoutLog.finer('   - $key: $value');
@@ -573,6 +720,68 @@ class _SingleColumnDocumentLayoutState extends State<SingleColumnDocumentLayout>
       newComponentKeyMap[nodeId] = GlobalKey();
     }
     return newComponentKeyMap[nodeId]!;
+  }
+
+  /// Finds the component whose vertical bounds contains the offset [dy].
+  ///
+  /// Returns the index of the component, from top to bottom order.
+  int _findComponentIndexAtOffset(double dy) {
+    if (_topToBottomComponentKeys.isEmpty) {
+      return -1;
+    }
+    return _binarySearchComponentIndexAtOffset(dy, 0, _topToBottomComponentKeys.length - 1);
+  }
+
+  /// Performs a binary search starting from [minIndex] to [maxIndex] to find
+  /// a component whose bounds contains the offset [dy].
+  ///
+  /// Returns the index of the component, from top to bottom order.
+  int _binarySearchComponentIndexAtOffset(double dy, int minIndex, int maxIndex) {
+    if (minIndex > maxIndex) {
+      return -1;
+    }
+
+    final middleIndex = ((minIndex + maxIndex) / 2).floor();
+    final componentBounds = _getComponentBoundsByIndex(middleIndex);
+
+    if (componentBounds.top <= dy && dy <= componentBounds.bottom) {
+      // The component in the middle of the search region is the one we're looking for. Return its index.
+      return middleIndex;
+    }
+
+    if (dy > componentBounds.bottom) {
+      if (middleIndex + 1 < _topToBottomComponentKeys.length) {
+        // Check the gap between two components.
+        final nextComponentBounds = _getComponentBoundsByIndex(middleIndex + 1);
+        final gap = nextComponentBounds.top - componentBounds.bottom;
+        if (componentBounds.bottom < dy && dy < (componentBounds.bottom + gap / 2)) {
+          // The component we're looking for is somewhere in the bottom half of the current search region.
+          return middleIndex;
+        }
+      }
+      return _binarySearchComponentIndexAtOffset(dy, middleIndex + 1, maxIndex);
+    } else {
+      if (middleIndex - 1 >= 0) {
+        // Check the gap between two components.
+        final previousComponentBounds = _getComponentBoundsByIndex(middleIndex - 1);
+        final gap = componentBounds.top - previousComponentBounds.bottom;
+        if ((componentBounds.top - gap / 2) < dy && dy < componentBounds.top) {
+          // The component we're looking for is somewhere in the top half of the current search region.
+          return middleIndex;
+        }
+      }
+      return _binarySearchComponentIndexAtOffset(dy, minIndex, middleIndex - 1);
+    }
+  }
+
+  /// Gets the component bounds of the component at [componentIndex] from top to bottom order.
+  Rect _getComponentBoundsByIndex(int componentIndex) {
+    final componentKey = _topToBottomComponentKeys[componentIndex];
+    final component = componentKey.currentState as DocumentComponent;
+
+    final componentBox = component.context.findRenderObject() as RenderBox;
+    final contentOffset = componentBox.localToGlobal(Offset.zero, ancestor: context.findRenderObject());
+    return contentOffset & componentBox.size;
   }
 }
 
@@ -635,7 +844,7 @@ class _PresenterComponentBuilderState extends State<_PresenterComponentBuilder> 
 
   @override
   Widget build(BuildContext context) {
-    editorImeLog.fine("Building component: ${widget.watchNode}");
+    editorLayoutLog.finest("Building component: ${widget.watchNode}");
 
     final viewModel = widget
         .presenter //
@@ -658,6 +867,7 @@ class _Component extends StatelessWidget {
     required this.componentBuilders,
     required this.componentViewModel,
     required this.componentKey,
+    // ignore: unused_element
     this.showDebugPaint = false,
   }) : super(key: key);
 

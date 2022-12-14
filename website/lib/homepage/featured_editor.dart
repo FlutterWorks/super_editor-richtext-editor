@@ -15,11 +15,9 @@ class FeaturedEditor extends StatefulWidget {
   const FeaturedEditor({
     Key? key,
     this.displayMode,
-    this.shadows = const [],
   }) : super(key: key);
 
   final DisplayMode? displayMode;
-  final List<BoxShadow> shadows;
 
   @override
   _FeaturedEditorState createState() => _FeaturedEditorState();
@@ -104,7 +102,7 @@ class _FeaturedEditorState extends State<FeaturedEditor> {
       // Schedule a callback after this frame to locate the selection
       // bounds on the screen and display the toolbar near the selected
       // text.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         _updateToolbarOffset();
       });
     }
@@ -198,19 +196,12 @@ class _FeaturedEditorState extends State<FeaturedEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: widget.shadows,
-      ),
-      child: SuperEditor(
-        editor: _docEditor,
-        composer: _composer,
-        documentLayoutKey: _docLayoutKey,
-        focusNode: _editorFocusNode,
-        stylesheet: _getEditorStyleSheet(),
-      ),
+    return SuperEditor(
+      editor: _docEditor,
+      composer: _composer,
+      documentLayoutKey: _docLayoutKey,
+      focusNode: _editorFocusNode,
+      stylesheet: _getEditorStyleSheet(),
     );
   }
 
@@ -313,9 +304,9 @@ const _baseTextStyle = TextStyle(
 final _compactStylesheet = defaultStylesheet.copyWith(
   documentPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
   addRulesAfter: [
-    StyleRule(const BlockSelector.all(), (doc, docNode) => {'textStyle': _baseTextStyle}),
+    StyleRule(BlockSelector.all, (doc, docNode) => {'textStyle': _baseTextStyle}),
     StyleRule(
-      const BlockSelector.all().after(header1Attribution.name),
+      BlockSelector.all.after(header1Attribution.name),
       (doc, docNode) => {'padding': const CascadingPadding.only(top: 24)},
     ),
     StyleRule(
@@ -364,9 +355,9 @@ final _compactStylesheet = defaultStylesheet.copyWith(
 final _wideStylesheet = defaultStylesheet.copyWith(
   documentPadding: const EdgeInsets.symmetric(horizontal: 54, vertical: 60),
   addRulesAfter: [
-    StyleRule(const BlockSelector.all(), (doc, docNode) => {'textStyle': _baseTextStyle}),
+    StyleRule(BlockSelector.all, (doc, docNode) => {'textStyle': _baseTextStyle}),
     StyleRule(
-      const BlockSelector.all().after(header1Attribution.name),
+      BlockSelector.all.after(header1Attribution.name),
       (doc, docNode) => {'padding': const CascadingPadding.only(top: 48)},
     ),
     StyleRule(

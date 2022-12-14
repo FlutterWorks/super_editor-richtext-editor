@@ -1,8 +1,14 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:super_editor/super_editor.dart';
+import 'package:super_editor/super_editor_test.dart';
 
+import '../../super_editor/document_test_tools.dart';
+import '../../test_tools.dart';
 import '../_document_test_tools.dart';
+import '../../super_editor/test_documents.dart';
 
 void main() {
   group('IME input', () {
@@ -70,6 +76,99 @@ void main() {
         ]);
 
         expect((document.nodes.first as ParagraphNode).text.text, "This is a sentence. ");
+      });
+
+      testWidgets('can type compound character in an empty paragraph', (tester) async {
+        // Inserting special characters, or compound characters, like ü, requires
+        // multiple key presses, which are combined by the IME, based on the
+        // composing region.
+        //
+        // A blank paragraph is serialized with a leading ". " to trick IMEs into
+        // auto-capitalizing the first character the user types, while still reporting
+        // a `backspace` operation, if the user presses backspace on a software keyboard.
+        //
+        // This test ensures that when we go from an empty paragraph with a hidden ". ", to
+        // a character with a composing region, like "¨", we report the correct composing region.
+        // For example, due to our hidden ". ", when the user enters a "¨", the IME thinks
+        // the composing region is [2,3], like ". ¨", but the text is actually "¨", so we
+        // need to adjust the composing region to [0,1].
+        final editContext = createEditContext(
+          // Use a two-paragraph document so that the selection in the 2nd
+          // paragraph sends a hidden placeholder to the IME for backspace.
+          document: twoParagraphEmptyDoc(),
+          documentComposer: DocumentComposer(
+            initialSelection: const DocumentSelection.collapsed(
+              position: DocumentPosition(
+                // Start the caret in the 2nd paragraph so that we send a
+                // hidden placeholder to the IME to report backspaces.
+                nodeId: "2",
+                nodePosition: TextNodePosition(
+                  offset: 0,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SuperEditor(
+                editor: editContext.editor,
+                composer: editContext.composer,
+                inputSource: DocumentInputSource.ime,
+                gestureMode: DocumentGestureMode.mouse,
+                autofocus: true,
+              ),
+            ),
+          ),
+        );
+
+        // Send the deltas that should produce a ü.
+        //
+        // We have to use implementation details to send the simulated IME deltas
+        // because Flutter doesn't have any testing tools for IME deltas.
+        final imeInteractor = find.byType(DocumentImeInteractor).evaluate().first;
+        final deltaClient = (imeInteractor as StatefulElement).state as DeltaTextInputClient;
+
+        // Ensure that the delta client starts with the expected invisible placeholder
+        // characters.
+        expect(deltaClient.currentTextEditingValue!.text, ". ");
+        expect(deltaClient.currentTextEditingValue!.selection, const TextSelection.collapsed(offset: 2));
+        expect(deltaClient.currentTextEditingValue!.composing, const TextRange(start: -1, end: -1));
+
+        // Insert the "opt+u" character.
+        deltaClient.updateEditingValueWithDeltas([
+          const TextEditingDeltaInsertion(
+            oldText: ". ",
+            textInserted: "¨",
+            insertionOffset: 2,
+            selection: TextSelection.collapsed(offset: 3),
+            composing: TextRange(start: 2, end: 3),
+          ),
+        ]);
+
+        // Ensure that the empty paragraph now reads "¨".
+        expect((editContext.editor.document.nodes[1] as ParagraphNode).text.text, "¨");
+
+        // Ensure that the reported composing region respects the removal of the
+        // invisible placeholder characters. THIS IS WHERE THE ORIGINAL BUG HAPPENED.
+        expect(deltaClient.currentTextEditingValue!.text, "¨");
+        expect(deltaClient.currentTextEditingValue!.composing, const TextRange(start: 0, end: 1));
+
+        // Insert the "u" character to create the compound character.
+        deltaClient.updateEditingValueWithDeltas([
+          const TextEditingDeltaReplacement(
+            oldText: "¨",
+            replacementText: "ü",
+            replacedRange: TextRange(start: 0, end: 1),
+            selection: TextSelection.collapsed(offset: 1),
+            composing: TextRange(start: -1, end: -1),
+          ),
+        ]);
+
+        // Ensure that the empty paragraph now reads "ü".
+        expect((editContext.editor.document.nodes[1] as ParagraphNode).text.text, "ü");
       });
     });
 
@@ -172,6 +271,48 @@ void main() {
         );
       });
     });
+
+    group('typing characters near a link', () {
+      testWidgetsOnMobile('does not expand the link when inserting before the link', (tester) async {
+        // Configure and render a document.
+        await tester //
+            .createDocument()
+            .withCustomContent(_singleParagraphWithLinkDoc())
+            .pump();
+
+        // Place the caret at the start of the link.
+        await tester.placeCaretInParagraph('1', 0);
+
+        // Type characters before the link using the IME
+        await tester.ime.typeText("Go to ", getter: imeClientGetter);
+
+        // Ensure that the link is unchanged
+        expect(
+          SuperEditorInspector.findDocument(),
+          equalsMarkdown("Go to [https://google.com](https://google.com)"),
+        );
+      });
+
+      testWidgetsOnMobile('does not expand the link when inserting after the link', (tester) async {
+        // Configure and render a document.
+        await tester //
+            .createDocument()
+            .withCustomContent(_singleParagraphWithLinkDoc())
+            .pump();
+
+        // Place the caret at the end of the link.
+        await tester.placeCaretInParagraph('1', 18);
+
+        // Type characters after the link using the IME
+        await tester.ime.typeText(" to learn anything", getter: imeClientGetter);
+
+        // Ensure that the link is unchanged
+        expect(
+          SuperEditorInspector.findDocument(),
+          equalsMarkdown("[https://google.com](https://google.com) to learn anything"),
+        );
+      });
+    });
   });
 }
 
@@ -206,5 +347,32 @@ void _expectTextEditingValue({
   expect(
     actualTextEditingValue,
     TextEditingValue(text: expectedText, selection: expectedSelection),
+  );
+}
+
+MutableDocument _singleParagraphWithLinkDoc() {
+  return MutableDocument(
+    nodes: [
+      ParagraphNode(
+        id: "1",
+        text: AttributedText(
+          text: "https://google.com",
+          spans: AttributedSpans(
+            attributions: [
+              SpanMarker(
+                attribution: LinkAttribution(url: Uri.parse('https://google.com')),
+                offset: 0,
+                markerType: SpanMarkerType.start,
+              ),
+              SpanMarker(
+                attribution: LinkAttribution(url: Uri.parse('https://google.com')),
+                offset: 17,
+                markerType: SpanMarkerType.end,
+              ),
+            ],
+          ),
+        ),
+      )
+    ],
   );
 }

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:super_editor/src/core/document.dart';
 import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
 
 import '../core/document_layout.dart';
 
@@ -83,7 +82,7 @@ class BoxComponent extends StatefulWidget {
   final Widget child;
 
   @override
-  _BoxComponentState createState() => _BoxComponentState();
+  State createState() => _BoxComponentState();
 }
 
 class _BoxComponentState extends State<BoxComponent> with DocumentComponent {
@@ -102,8 +101,7 @@ class _BoxComponentState extends State<BoxComponent> with DocumentComponent {
   }
 
   @override
-  UpstreamDownstreamNodePosition? movePositionLeft(dynamic currentPosition,
-      [Set<MovementModifier>? movementModifiers]) {
+  UpstreamDownstreamNodePosition? movePositionLeft(dynamic currentPosition, [MovementModifier? movementModifier]) {
     if (currentPosition == const UpstreamDownstreamNodePosition.upstream()) {
       // Can't move any further left.
       return null;
@@ -113,8 +111,7 @@ class _BoxComponentState extends State<BoxComponent> with DocumentComponent {
   }
 
   @override
-  UpstreamDownstreamNodePosition? movePositionRight(dynamic currentPosition,
-      [Set<MovementModifier>? movementModifiers]) {
+  UpstreamDownstreamNodePosition? movePositionRight(dynamic currentPosition, [MovementModifier? movementModifier]) {
     if (currentPosition == const UpstreamDownstreamNodePosition.downstream()) {
       // Can't move any further right.
       return null;
@@ -270,44 +267,28 @@ class SelectableBox extends StatelessWidget {
     Key? key,
     this.selection,
     required this.selectionColor,
-    required this.caretColor,
-    this.showCaret = false,
     required this.child,
   }) : super(key: key);
 
   final UpstreamDownstreamNodeSelection? selection;
   final Color selectionColor;
-  final bool showCaret;
-  final Color caretColor;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
     final isSelected = selection != null && !selection!.isCollapsed;
 
-    return Stack(
-      children: [
-        DecoratedBox(
+    return MouseRegion(
+      cursor: SystemMouseCursors.basic,
+      child: IgnorePointer(
+        child: DecoratedBox(
           decoration: BoxDecoration(
             color: isSelected ? selectionColor.withOpacity(0.5) : Colors.transparent,
           ),
           position: DecorationPosition.foreground,
           child: child,
         ),
-        if (selection != null && showCaret)
-          Positioned(
-            left: selection!.extent.affinity == TextAffinity.upstream ? 0 : null,
-            right: selection!.extent.affinity == TextAffinity.upstream ? null : 0,
-            top: 0,
-            bottom: 0,
-            width: 1,
-            child: BlinkingCaret(
-              color: caretColor,
-              caretOffset: Offset.zero,
-              width: 1,
-            ),
-          ),
-      ],
+      ),
     );
   }
 }

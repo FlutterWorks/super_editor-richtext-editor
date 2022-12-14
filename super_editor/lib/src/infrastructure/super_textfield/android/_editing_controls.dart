@@ -8,9 +8,9 @@ import 'package:super_editor/src/infrastructure/platforms/android/magnifier.dart
 import 'package:super_editor/src/infrastructure/super_textfield/android/android_textfield.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/attributed_text_editing_controller.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/text_scrollview.dart';
-import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/toolbar_position_delegate.dart';
+import 'package:super_editor/src/infrastructure/toolbar_position_delegate.dart';
 import 'package:super_editor/src/infrastructure/touch_controls.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 final _log = androidTextFieldLog;
 
@@ -58,9 +58,9 @@ class AndroidEditingOverlayControls extends StatefulWidget {
   /// within the text field.
   final LayerLink textContentLayerLink;
 
-  /// [GlobalKey] that references the [SuperSelectableTextState] within
+  /// [GlobalKey] that references the widget that contains the text within
   /// the text field.
-  final GlobalKey<SuperSelectableTextState> textContentKey;
+  final GlobalKey<ProseTextState> textContentKey;
 
   /// The color of the selection handles.
   final Color handleColor;
@@ -75,7 +75,7 @@ class AndroidEditingOverlayControls extends StatefulWidget {
   final Widget Function(BuildContext, AndroidEditingOverlayController) popoverToolbarBuilder;
 
   @override
-  _AndroidEditingOverlayControlsState createState() => _AndroidEditingOverlayControlsState();
+  State createState() => _AndroidEditingOverlayControlsState();
 }
 
 class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayControls> with WidgetsBindingObserver {
@@ -112,7 +112,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   void initState() {
     super.initState();
 
-    WidgetsBinding.instance!.addObserver(this);
+    WidgetsBinding.instance.addObserver(this);
 
     widget.editingController.textController.addListener(_rebuildOnNextFrame);
   }
@@ -131,7 +131,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   void dispose() {
     widget.editingController.textController.removeListener(_rebuildOnNextFrame);
 
-    WidgetsBinding.instance!.removeObserver(this);
+    WidgetsBinding.instance.removeObserver(this);
 
     super.dispose();
   }
@@ -141,7 +141,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     // The available screen dimensions may have changed, e.g., due to keyboard
     // appearance/disappearance. Reflow the layout. Use a post-frame callback
     // to give the rest of the UI a chance to reflow, first.
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (mounted) {
         setState(() {
           // no-op
@@ -150,11 +150,13 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     });
   }
 
+  ProseTextLayout get _textLayout => widget.textContentKey.currentState!.textLayout;
+
   void _rebuildOnNextFrame() {
     // We request a rebuild at the end of this frame so that the editing
     // controls update their position to reflect changes to text styling,
     // e.g., text that gets wider because it was bolded.
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (mounted) {
         setState(() {});
       }
@@ -278,7 +280,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   void _updateSelectionForNewDragHandleLocation() {
     final textBox = (widget.textContentKey.currentContext!.findRenderObject() as RenderBox);
     final textOffset = textBox.globalToLocal(_globalDragOffset! + _touchHandleOffsetFromLineOfText!);
-    final textLayout = widget.textContentKey.currentState!;
+    final textLayout = widget.textContentKey.currentState!.textLayout;
     if (_isDraggingCollapsed) {
       widget.editingController.textController.selection = TextSelection.collapsed(
         offset: textLayout.getPositionNearestToOffset(textOffset).offset,
@@ -332,7 +334,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   }
 
   Offset _textPositionToViewportOffset(TextPosition position) {
-    final textOffset = widget.textContentKey.currentState!.getOffsetAtPosition(position);
+    final textOffset = _textLayout.getOffsetAtPosition(position);
     final globalOffset =
         (widget.textContentKey.currentContext!.findRenderObject() as RenderBox).localToGlobal(textOffset);
     return (widget.textFieldKey.currentContext!.findRenderObject() as RenderBox).globalToLocal(globalOffset);
@@ -345,14 +347,14 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   }
 
   Offset _textPositionToTextOffset(TextPosition position) {
-    return widget.textContentKey.currentState!.getOffsetAtPosition(position);
+    return _textLayout.getOffsetAtPosition(position);
   }
 
   Offset _getGlobalOffsetOfMiddleOfLine(TextPosition position) {
     // TODO: can we de-dup this with similar calculations in _user_interaction?
-    final textLayout = widget.textContentKey.currentState!;
+    final textLayout = _textLayout;
     final extentOffsetInText = textLayout.getOffsetAtPosition(position);
-    final extentLineHeight = textLayout.getCharacterBox(position).toRect().height;
+    final extentLineHeight = textLayout.getCharacterBox(position)?.toRect().height ?? textLayout.estimatedLineHeight;
     final extentGlobalOffset =
         (widget.textContentKey.currentContext!.findRenderObject() as RenderBox).localToGlobal(extentOffsetInText);
 
@@ -367,7 +369,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   Widget build(BuildContext context) {
     final textFieldRenderObject = context.findRenderObject();
     if (textFieldRenderObject == null) {
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         setState(() {});
       });
       return const SizedBox();
@@ -410,14 +412,12 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     if (widget.editingController.textController.selection.isCollapsed) {
       final extentOffsetInViewport =
           _textPositionToViewportOffset(widget.editingController.textController.selection.extent);
-      final lineHeight = widget.textContentKey.currentState!
-          .getLineHeightAtPosition(widget.editingController.textController.selection.extent);
+      final lineHeight = _textLayout.getLineHeightAtPosition(widget.editingController.textController.selection.extent);
 
       toolbarTopAnchor = extentOffsetInViewport - const Offset(0, toolbarGap);
       toolbarBottomAnchor = extentOffsetInViewport + Offset(0, lineHeight) + const Offset(0, toolbarGap);
     } else {
-      final selectionBoxes =
-          widget.textContentKey.currentState!.getBoxesForSelection(widget.editingController.textController.selection);
+      final selectionBoxes = _textLayout.getBoxesForSelection(widget.editingController.textController.selection);
       Rect selectionBounds = selectionBoxes.first.toRect();
       for (int i = 1; i < selectionBoxes.length; ++i) {
         selectionBounds = selectionBounds.expandToInclude(selectionBoxes[i].toRect());
@@ -515,9 +515,10 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     _log.finer('Collapsed handle text position: $extentTextPosition');
     final extentHandleOffsetInText = _textPositionToTextOffset(extentTextPosition);
     _log.finer('Collapsed handle text offset: $extentHandleOffsetInText');
-    double extentLineHeight = widget.textContentKey.currentState!.getCharacterBox(extentTextPosition).toRect().height;
+    double extentLineHeight =
+        _textLayout.getCharacterBox(extentTextPosition)?.toRect().height ?? _textLayout.estimatedLineHeight;
     if (widget.editingController.textController.text.text.isEmpty) {
-      extentLineHeight = widget.textContentKey.currentState!.getLineHeightAtPosition(extentTextPosition);
+      extentLineHeight = _textLayout.getLineHeightAtPosition(extentTextPosition);
     }
 
     if (extentHandleOffsetInText == const Offset(0, 0) && extentTextPosition.offset != 0) {
@@ -559,14 +560,14 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
         ? widget.editingController.textController.selection.base
         : widget.editingController.textController.selection.extent;
     final upstreamLineHeight =
-        widget.textContentKey.currentState!.getCharacterBox(upstreamTextPosition).toRect().height;
+        _textLayout.getCharacterBox(upstreamTextPosition)?.toRect().height ?? _textLayout.estimatedLineHeight;
     final upstreamHandleOffsetInText = _textPositionToTextOffset(upstreamTextPosition) + Offset(0, upstreamLineHeight);
 
     final downstreamTextPosition = selectionDirection == TextAffinity.downstream
         ? widget.editingController.textController.selection.extent
         : widget.editingController.textController.selection.base;
     final downstreamLineHeight =
-        widget.textContentKey.currentState!.getCharacterBox(downstreamTextPosition).toRect().height;
+        _textLayout.getCharacterBox(downstreamTextPosition)?.toRect().height ?? _textLayout.estimatedLineHeight;
     final downstreamHandleOffsetInText =
         _textPositionToTextOffset(downstreamTextPosition) + Offset(0, downstreamLineHeight);
 
@@ -636,8 +637,10 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
           onPanUpdate: _onPanUpdate,
           onPanEnd: _onPanEnd,
           onPanCancel: _onPanCancel,
-          child: Container(
-            color: widget.showDebugPaint ? Colors.green : Colors.transparent,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: widget.showDebugPaint ? Colors.green : Colors.transparent,
+            ),
             child: showHandle
                 ? AnimatedOpacity(
                     opacity: handleType == HandleType.collapsed && widget.editingController.isCollapsedHandleAutoHidden
@@ -699,7 +702,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   }
 
   void _scheduleRebuildBecauseTextIsNotLaidOutYet() {
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (mounted) {
         setState(() {
           // no-op. Rebuild this widget in the hopes that the selectable

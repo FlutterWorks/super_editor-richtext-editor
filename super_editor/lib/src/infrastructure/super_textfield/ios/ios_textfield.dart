@@ -1,19 +1,21 @@
 import 'package:attributed_text/attributed_text.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ListenableBuilder;
 import 'package:flutter/services.dart';
-import 'package:super_editor/src/default_editor/super_editor.dart';
 import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
-import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/attributed_text_editing_controller.dart';
+import 'package:super_editor/src/infrastructure/focus.dart';
+import 'package:super_editor/src/infrastructure/ime_input_owner.dart';
+import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/fill_width_if_constrained.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/hint_text.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/infrastructure/text_scrollview.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/input_method_engine/_ime_text_editing_controller.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/ios/_editing_controls.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 import '../../platforms/ios/toolbar.dart';
-import '_caret.dart';
+import '../metrics.dart';
+import '../styles.dart';
 import '_floating_cursor.dart';
 import '_user_interaction.dart';
 
@@ -30,23 +32,21 @@ class SuperIOSTextField extends StatefulWidget {
     Key? key,
     this.focusNode,
     this.textController,
-    this.textStyleBuilder = defaultStyleBuilder,
+    this.textStyleBuilder = defaultTextFieldStyleBuilder,
     this.textAlign = TextAlign.left,
     this.hintBehavior = HintBehavior.displayHintUntilFocus,
     this.hintBuilder,
     this.minLines,
     this.maxLines = 1,
     this.lineHeight,
-    required this.caretColor,
+    required this.caretStyle,
     required this.selectionColor,
     required this.handlesColor,
     this.textInputAction = TextInputAction.done,
     this.popoverToolbarBuilder = _defaultPopoverToolbarBuilder,
     this.showDebugPaint = false,
-    this.onPerformActionPressed,
-  })  : assert(minLines == null || minLines == 1 || lineHeight != null, 'minLines > 1 requires a non-null lineHeight'),
-        assert(maxLines == null || maxLines == 1 || lineHeight != null, 'maxLines > 1 requires a non-null lineHeight'),
-        super(key: key);
+    this.padding,
+  }) : super(key: key);
 
   /// [FocusNode] attached to this text field.
   final FocusNode? focusNode;
@@ -70,8 +70,8 @@ class SuperIOSTextField extends StatefulWidget {
   /// To easily build a hint with styled text, see [StyledHintBuilder].
   final WidgetBuilder? hintBuilder;
 
-  /// Color of the caret.
-  final Color caretColor;
+  /// The visual representation of the caret.
+  final CaretStyle caretStyle;
 
   /// Color of the selection rectangle for selected text.
   final Color selectionColor;
@@ -111,12 +111,10 @@ class SuperIOSTextField extends StatefulWidget {
   /// The height of a single line of text in this text scroll view, used
   /// with [minLines] and [maxLines] to size the text field.
   ///
-  /// An explicit [lineHeight] is required for multi-line text fields
-  /// because rich text in this text scroll view might have lines of
-  /// varying height, which would result in a constantly changing text
-  /// field height during scrolling. To avoid that situation, a single,
-  /// explicit [lineHeight] is provided and used for all text field height
-  /// calculations.
+  /// If a [lineHeight] is provided, the text field viewport is sized as a
+  /// multiple of that [lineHeight]. If no [lineHeight] is provided, the
+  /// text field viewport is sized as a multiple of the line-height of the
+  /// first line of text.
   final double? lineHeight;
 
   /// The type of action associated with the action button on the mobile
@@ -129,20 +127,25 @@ class SuperIOSTextField extends StatefulWidget {
   /// Whether to paint debug guides.
   final bool showDebugPaint;
 
-  /// Callback invoked when the user presses the "action" button
-  /// on the keyboard, e.g., "done", "call", "emergency", etc.
-  final Function(TextInputAction)? onPerformActionPressed;
+  /// Padding placed around the text content of this text field, but within the
+  /// scrollable viewport.
+  final EdgeInsets? padding;
 
   @override
-  _SuperIOSTextFieldState createState() => _SuperIOSTextFieldState();
+  State createState() => SuperIOSTextFieldState();
 }
 
-class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTickerProviderStateMixin {
+class SuperIOSTextFieldState extends State<SuperIOSTextField>
+    with TickerProviderStateMixin, WidgetsBindingObserver
+    implements ProseTextBlock, ImeInputOwner {
+  static const Duration _autoScrollAnimationDuration = Duration(milliseconds: 100);
+  static const Curve _autoScrollAnimationCurve = Curves.fastOutSlowIn;
+
   final _textFieldKey = GlobalKey();
   final _textFieldLayerLink = LayerLink();
   final _textContentLayerLink = LayerLink();
   final _scrollKey = GlobalKey<IOSTextFieldTouchInteractorState>();
-  final _textContentKey = GlobalKey<SuperSelectableTextState>();
+  final _textContentKey = GlobalKey<ProseTextState>();
 
   late FocusNode _focusNode;
 
@@ -162,16 +165,12 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
   @override
   void initState() {
     super.initState();
-    _focusNode = (widget.focusNode ?? FocusNode())
-      ..unfocus()
-      ..addListener(_onFocusChange);
-    if (_focusNode.hasFocus) {
-      _showHandles();
-    }
+    _focusNode = (widget.focusNode ?? FocusNode())..addListener(_updateSelectionAndImeConnectionOnFocusChange);
 
     _textEditingController = (widget.textController ?? ImeAttributedTextEditingController())
       ..addListener(_onTextOrSelectionChange)
-      ..onIOSFloatingCursorChange = _onFloatingCursorChange;
+      ..onIOSFloatingCursorChange = _onFloatingCursorChange
+      ..onPerformActionPressed ??= _onPerformActionPressed;
 
     _textScrollController = TextScrollController(
       textController: _textEditingController,
@@ -186,6 +185,15 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
       textController: _textEditingController,
       magnifierFocalPoint: _magnifierLayerLink,
     );
+
+    WidgetsBinding.instance.addObserver(this);
+
+    if (_focusNode.hasFocus) {
+      // The given FocusNode already has focus, we need to update selection and attach to IME.
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+        _updateSelectionAndImeConnectionOnFocusChange();
+      });
+    }
   }
 
   @override
@@ -193,19 +201,22 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
     super.didUpdateWidget(oldWidget);
 
     if (widget.focusNode != oldWidget.focusNode) {
-      _focusNode.removeListener(_onFocusChange);
+      _focusNode.removeListener(_updateSelectionAndImeConnectionOnFocusChange);
       if (widget.focusNode != null) {
         _focusNode = widget.focusNode!;
       } else {
         _focusNode = FocusNode();
       }
-      _focusNode.addListener(_onFocusChange);
+      _focusNode.addListener(_updateSelectionAndImeConnectionOnFocusChange);
     }
 
     if (widget.textController != oldWidget.textController) {
       _textEditingController
         ..removeListener(_onTextOrSelectionChange)
         ..onIOSFloatingCursorChange = null;
+      if (_textEditingController.onPerformActionPressed == _onPerformActionPressed) {
+        _textEditingController.onPerformActionPressed = null;
+      }
 
       if (widget.textController != null) {
         _textEditingController = widget.textController!;
@@ -215,11 +226,12 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
 
       _textEditingController
         ..addListener(_onTextOrSelectionChange)
-        ..onIOSFloatingCursorChange = _onFloatingCursorChange;
+        ..onIOSFloatingCursorChange = _onFloatingCursorChange
+        ..onPerformActionPressed ??= _onPerformActionPressed;
     }
 
     if (widget.showDebugPaint != oldWidget.showDebugPaint) {
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         _rebuildHandles();
       });
     }
@@ -235,7 +247,7 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
     // available upon Hot Reload. Accessing it results in an exception.
     _removeEditingOverlayControls();
 
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       _showHandles();
     });
   }
@@ -244,7 +256,7 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
   void dispose() {
     _removeEditingOverlayControls();
 
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       // Dispose after the current frame so that other widgets have
       // time to remove their listeners.
       _editingOverlayController.dispose();
@@ -254,14 +266,14 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
       ..removeListener(_onTextOrSelectionChange)
       ..onIOSFloatingCursorChange = null;
     if (widget.textController == null) {
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         // Dispose after the current frame so that other widgets have
         // time to remove their listeners.
         _textEditingController.dispose();
       });
     }
 
-    _focusNode.removeListener(_onFocusChange);
+    _focusNode.removeListener(_updateSelectionAndImeConnectionOnFocusChange);
     if (widget.focusNode == null) {
       _focusNode.dispose();
     }
@@ -270,20 +282,45 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
       ..removeListener(_onTextScrollChange)
       ..dispose();
 
+    WidgetsBinding.instance.removeObserver(this);
+
     super.dispose();
   }
 
-  bool get _isMultiline => widget.minLines != 1 || widget.maxLines != 1;
+  @override
+  void didChangeMetrics() {
+    // The available screen dimensions may have changed, e.g., due to keyboard
+    // appearance/disappearance.
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
+      if (mounted && _focusNode.hasFocus) {
+        _autoScrollToKeepTextFieldVisible();
+      }
+    });
+  }
 
-  void _onFocusChange() {
+  @override
+  ProseTextLayout get textLayout => _textContentKey.currentState!.textLayout;
+
+  bool get _isMultiline => (widget.minLines ?? 1) != 1 || widget.maxLines != 1;
+
+  @override
+  DeltaTextInputClient get imeClient => _textEditingController;
+
+  void _updateSelectionAndImeConnectionOnFocusChange() {
     if (_focusNode.hasFocus) {
       if (!_textEditingController.isAttachedToIme) {
         _log.info('Attaching TextInputClient to TextInput');
         setState(() {
+          if (!_textEditingController.selection.isValid) {
+            _textEditingController.selection = TextSelection.collapsed(offset: _textEditingController.text.text.length);
+          }
+
           _textEditingController.attachToIme(
             textInputAction: widget.textInputAction,
+            textInputType: _isMultiline ? TextInputType.multiline : TextInputType.text,
           );
 
+          _autoScrollToKeepTextFieldVisible();
           _showHandles();
         });
       }
@@ -301,6 +338,7 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
     if (_textEditingController.selection.isCollapsed) {
       _editingOverlayController.hideToolbar();
     }
+    _textScrollController.ensureExtentIsVisible();
   }
 
   void _onTextScrollChange() {
@@ -327,7 +365,7 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
         );
       });
 
-      Overlay.of(context)!.insert(_controlsOverlayEntry!);
+      Overlay.of(context).insert(_controlsOverlayEntry!);
     }
   }
 
@@ -347,12 +385,82 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
   }
 
   void _onFloatingCursorChange(RawFloatingCursorPoint point) {
-    _floatingCursorController.updateFloatingCursor(_textContentKey.currentState!, point);
+    _floatingCursorController.updateFloatingCursor(_textContentKey.currentState!.textLayout, point);
+  }
+
+  /// Handles actions from the IME
+  void _onPerformActionPressed(TextInputAction action) {
+    switch (action) {
+      case TextInputAction.done:
+        _focusNode.unfocus();
+        break;
+      case TextInputAction.next:
+        _focusNode.nextFocus();
+        break;
+      case TextInputAction.previous:
+        _focusNode.previousFocus();
+        break;
+      default:
+        _log.warning("User pressed unhandled action button: $action");
+    }
+  }
+
+  /// Scrolls the ancestor [Scrollable], if any, so [SuperTextField]
+  /// is visible on the viewport when it's focused
+  void _autoScrollToKeepTextFieldVisible() {
+    // If we are not inside a [Scrollable] we don't autoscroll
+    final ancestorScrollable = _findAncestorScrollable(context);
+    if (ancestorScrollable == null) {
+      return;
+    }
+
+    // Compute the text field offset that should be visible to the user
+    final textFieldFocalPoint = widget.maxLines == null && _textEditingController.selection.isValid
+        ? _textContentKey.currentState!.textLayout.getOffsetAtPosition(
+            TextPosition(offset: _textEditingController.selection.extentOffset),
+          )
+        : Offset.zero;
+
+    final lineHeight = _textContentKey.currentState!.textLayout.getLineHeightAtPosition(
+      TextPosition(offset: _textEditingController.selection.extentOffset),
+    );
+    final fieldBox = context.findRenderObject() as RenderBox;
+
+    // The area of the text field that should be revealed.
+    // We add a small margin to leave some space between the text field and the keyboard.
+    final textFieldFocalRect = Rect.fromLTWH(
+      textFieldFocalPoint.dx,
+      textFieldFocalPoint.dy,
+      fieldBox.size.width,
+      lineHeight + gapBetweenCaretAndKeyboard,
+    );
+
+    fieldBox.showOnScreen(
+      rect: textFieldFocalRect,
+      duration: _autoScrollAnimationDuration,
+      curve: _autoScrollAnimationCurve,
+    );
+  }
+
+  ScrollableState? _findAncestorScrollable(BuildContext context) {
+    final ancestorScrollable = Scrollable.maybeOf(context);
+    if (ancestorScrollable == null) {
+      return null;
+    }
+
+    final direction = ancestorScrollable.axisDirection;
+    // If the direction is horizontal, then we are inside a widget like a TabBar
+    // or a horizontal ListView, so we can't use the ancestor scrollable
+    if (direction == AxisDirection.left || direction == AxisDirection.right) {
+      return null;
+    }
+
+    return ancestorScrollable;
   }
 
   @override
   Widget build(BuildContext context) {
-    return Focus(
+    return NonReparentingFocus(
       key: _textFieldKey,
       focusNode: _focusNode,
       child: CompositedTransformTarget(
@@ -372,14 +480,16 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
             textScrollController: _textScrollController,
             textKey: _textContentKey,
             textEditingController: _textEditingController,
+            textAlign: widget.textAlign,
             minLines: widget.minLines,
             maxLines: widget.maxLines,
             lineHeight: widget.lineHeight,
             perLineAutoScrollDuration: const Duration(milliseconds: 100),
             showDebugPaint: widget.showDebugPaint,
+            padding: widget.padding,
             child: ListenableBuilder(
               listenable: _textEditingController,
-              builder: (context) {
+              builder: (context, _) {
                 final isTextEmpty = _textEditingController.text.text.isEmpty;
                 final showHint = widget.hintBuilder != null &&
                     ((isTextEmpty && widget.hintBehavior == HintBehavior.displayHintUntilTextEntered) ||
@@ -418,20 +528,26 @@ class _SuperIOSTextFieldState extends State<SuperIOSTextField> with SingleTicker
         ? _textEditingController.text.computeTextSpan(widget.textStyleBuilder)
         : AttributedText(text: "").computeTextSpan(widget.textStyleBuilder);
 
-    // TODO: switch out textSelectionDecoration and textCaretFactory
-    //       for backgroundBuilders and foregroundBuilders, respectively
-    //
-    //       add the floating cursor as a foreground builder
-    return SuperSelectableText(
-      key: _textContentKey,
-      textSpan: textSpan,
-      textAlign: widget.textAlign,
-      textSelection: _textEditingController.selection,
-      textSelectionDecoration: TextSelectionDecoration(selectionColor: widget.selectionColor),
-      showCaret: true,
-      textCaretFactory: IOSTextFieldCaretFactory(
-        color: _floatingCursorController.isShowingFloatingCursor ? Colors.grey : widget.caretColor,
-        width: 2,
+    CaretStyle caretStyle = widget.caretStyle;
+
+    final caretColorOverride = _floatingCursorController.isShowingFloatingCursor ? Colors.grey : null;
+    if (caretColorOverride != null) {
+      caretStyle = caretStyle.copyWith(color: caretColorOverride);
+    }
+
+    return FillWidthIfConstrained(
+      child: SuperTextWithSelection.single(
+        key: _textContentKey,
+        richText: textSpan,
+        textAlign: widget.textAlign,
+        userSelection: UserSelection(
+          highlightStyle: SelectionHighlightStyle(
+            color: widget.selectionColor,
+          ),
+          caretStyle: caretStyle,
+          selection: _textEditingController.selection,
+          hasCaret: _focusNode.hasFocus,
+        ),
       ),
     );
   }

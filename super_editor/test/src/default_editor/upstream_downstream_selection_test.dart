@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
 
-import 'test_documents.dart';
+import '../../super_editor/test_documents.dart';
 
 /// Upstream/downstream selection refers components that only support
 /// a caret position at the upstream edge, or downstream edge. For
@@ -571,7 +571,7 @@ Widget _buildHardwareKeyboardEditor(MutableDocument document, DocumentComposer c
         // of lines, as needed.
         stylesheet: defaultStylesheet.copyWith(
           addRulesAfter: [
-            StyleRule(const BlockSelector.all(), (doc, node) {
+            StyleRule(BlockSelector.all, (doc, node) {
               return {
                 "textStyle": const TextStyle(
                   fontSize: 12,

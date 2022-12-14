@@ -1,7 +1,5 @@
 import 'dart:ui';
 
-import 'package:super_editor/src/default_editor/text.dart';
-
 import 'document.dart';
 
 /// A selection within a [Document].
@@ -132,7 +130,7 @@ class DocumentSelection {
       );
     }
 
-    return document.getNodeIndex(baseNode) < document.getNodeIndex(extentNode)
+    return document.getNodeIndexById(baseNode.id) < document.getNodeIndexById(extentNode.id)
         ? DocumentSelection.collapsed(position: base)
         : DocumentSelection.collapsed(position: extent);
   }
@@ -171,7 +169,7 @@ class DocumentSelection {
       );
     }
 
-    return document.getNodeIndex(baseNode) > document.getNodeIndex(extentNode)
+    return document.getNodeIndexById(baseNode.id) > document.getNodeIndexById(extentNode.id)
         ? DocumentSelection.collapsed(position: base)
         : DocumentSelection.collapsed(position: extent);
   }
@@ -219,9 +217,17 @@ extension InspectDocumentAffinity on Document {
     required DocumentPosition base,
     required DocumentPosition extent,
   }) {
-    final baseIndex = getNodeIndex(getNode(base)!);
-    final extentNode = getNode(extent)!;
-    final extentIndex = getNodeIndex(extentNode);
+    final baseNode = getNode(base);
+    if (baseNode == null) {
+      throw Exception('No such position in document: $base');
+    }
+    final baseIndex = getNodeIndexById(baseNode.id);
+
+    final extentNode = getNode(extent);
+    if (extentNode == null) {
+      throw Exception('No such position in document: $extent');
+    }
+    final extentIndex = getNodeIndexById(extentNode.id);
 
     late TextAffinity affinity;
     if (extentIndex > baseIndex) {
@@ -243,9 +249,9 @@ extension InspectDocumentSelection on Document {
   /// from upstream to downstream.
   List<DocumentNode> getNodesInContentOrder(DocumentSelection selection) {
     final upstreamPosition = selectUpstreamPosition(selection.base, selection.extent);
-    final upstreamIndex = getNodeIndex(getNode(upstreamPosition)!);
+    final upstreamIndex = getNodeIndexById(upstreamPosition.nodeId);
     final downstreamPosition = selectDownstreamPosition(selection.base, selection.extent);
-    final downstreamIndex = getNodeIndex(getNode(downstreamPosition)!);
+    final downstreamIndex = getNodeIndexById(downstreamPosition.nodeId);
 
     return nodes.sublist(upstreamIndex, downstreamIndex + 1);
   }
@@ -254,9 +260,9 @@ extension InspectDocumentSelection on Document {
   /// appears first in the document.
   DocumentPosition selectUpstreamPosition(DocumentPosition docPosition1, DocumentPosition docPosition2) {
     final docPosition1Node = getNodeById(docPosition1.nodeId)!;
-    final docPosition1NodeIndex = getNodeIndex(docPosition1Node);
+    final docPosition1NodeIndex = getNodeIndexById(docPosition1Node.id);
     final docPosition2Node = getNodeById(docPosition2.nodeId)!;
-    final docPosition2NodeIndex = getNodeIndex(docPosition2Node);
+    final docPosition2NodeIndex = getNodeIndexById(docPosition2Node.id);
 
     if (docPosition1NodeIndex < docPosition2NodeIndex) {
       return docPosition1;
@@ -288,16 +294,16 @@ extension InspectDocumentSelection on Document {
     }
 
     final baseNode = getNodeById(selection.base.nodeId)!;
-    final baseNodeIndex = getNodeIndex(baseNode);
+    final baseNodeIndex = getNodeIndexById(baseNode.id);
     final extentNode = getNodeById(selection.extent.nodeId)!;
-    final extentNodeIndex = getNodeIndex(extentNode);
+    final extentNodeIndex = getNodeIndexById(extentNode.id);
 
     final upstreamNode = baseNodeIndex < extentNodeIndex ? baseNode : extentNode;
     final upstreamNodeIndex = baseNodeIndex < extentNodeIndex ? baseNodeIndex : extentNodeIndex;
     final downstreamNode = baseNodeIndex < extentNodeIndex ? extentNode : baseNode;
     final downstreamNodeIndex = baseNodeIndex < extentNodeIndex ? extentNodeIndex : baseNodeIndex;
 
-    final positionNodeIndex = getNodeIndex(getNodeById(position.nodeId)!);
+    final positionNodeIndex = getNodeIndexById(position.nodeId);
 
     if (upstreamNodeIndex < positionNodeIndex && positionNodeIndex < downstreamNodeIndex) {
       // The given position is sandwiched between two other nodes that form
@@ -344,77 +350,5 @@ extension InspectDocumentSelection on Document {
     // selection boundary, or after the downstream selection boundary.
     // Either way, the position is not in the selection.
     return false;
-  }
-}
-
-/// Description of a selection within a specific node in a document.
-///
-/// The [nodeSelection] only describes the selection in the particular node
-/// that [nodeId] points to. The document might have a selection that spans
-/// multiple nodes but this only regards the part of that total selection that
-/// affects the single node.
-///
-/// The [SelectionType] is a generic subtype of [NodeSelection], i.e. for
-/// example a [TextNodeSelection] that describes which characters of text are
-/// selected within the text node.
-class DocumentNodeSelection<SelectionType extends NodeSelection> {
-  /// Creates a node selection for a particular node in the document.
-  DocumentNodeSelection({
-    required this.nodeId,
-    required this.nodeSelection,
-    this.isBase = false,
-    this.isExtent = false,
-    // TODO: either remove highlightWhenEmpty from this class, or move
-    //       this class to a different place. Visual preferences don't
-    //       belong here. (#52)
-    this.highlightWhenEmpty = false,
-  });
-
-  /// The ID of the node that is selected.
-  final String nodeId;
-
-  /// The selection within the given node.
-  final SelectionType? nodeSelection;
-
-  /// `true` if this [DocumentNodeSelection] forms the base position of a larger
-  /// document selection, `false` otherwise.
-  ///
-  /// If the node that [DocumentSelection.base] points to is equal to the node
-  /// that [nodeId] points to, [isBase] is `true`. Otherwise, it is `false`.
-  final bool isBase;
-
-  /// `true` if this [DocumentNodeSelection] forms the extent position of a
-  /// larger document selection, `false` otherwise.
-  ///
-  /// If the node that [DocumentSelection.extent] points to is equal to the node
-  /// that [nodeId] points to, [isExtent] is `true`. Otherwise, it is `false`.
-  final bool isExtent;
-
-  /// [true] if the component rendering this [DocumentNodeSelection] should
-  /// paint a highlight even when the given node has no content, [false]
-  /// otherwise.
-  ///
-  /// TODO: this is out-of-place here and should be removed.
-  ///
-  /// See also:
-  ///
-  ///  * [SuperSelectableText.highlightWhenEmpty], which the value of this field
-  ///    is indirectly passed to.
-  final bool highlightWhenEmpty;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DocumentNodeSelection &&
-          runtimeType == other.runtimeType &&
-          nodeId == other.nodeId &&
-          nodeSelection == other.nodeSelection;
-
-  @override
-  int get hashCode => nodeId.hashCode ^ nodeSelection.hashCode;
-
-  @override
-  String toString() {
-    return '[DocumentNodeSelection] - node: "$nodeId", selection: ($nodeSelection)';
   }
 }

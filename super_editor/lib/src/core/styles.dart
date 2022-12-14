@@ -74,14 +74,10 @@ typedef Styler = Map<String, dynamic> Function(Document, DocumentNode);
 
 /// Selects blocks in a document that matches a given rule.
 class BlockSelector {
+  static const all = BlockSelector._();
+
   const BlockSelector(this._blockType)
       : _precedingBlockType = null,
-        _followingBlockType = null,
-        _indexMatcher = null;
-
-  const BlockSelector.all()
-      : _blockType = null,
-        _precedingBlockType = null,
         _followingBlockType = null,
         _indexMatcher = null;
 
@@ -187,7 +183,7 @@ class _FirstBlockMatcher implements _BlockMatcher {
 
   @override
   bool matches(Document document, DocumentNode node) {
-    return document.getNodeIndex(node) == 0;
+    return document.getNodeIndexById(node.id) == 0;
   }
 }
 
@@ -196,7 +192,7 @@ class _LastBlockMatcher implements _BlockMatcher {
 
   @override
   bool matches(Document document, DocumentNode node) {
-    return document.getNodeIndex(node) == document.nodes.length - 1;
+    return document.getNodeIndexById(node.id) == document.nodes.length - 1;
   }
 }
 
@@ -207,7 +203,7 @@ class _IndexBlockMatcher implements _BlockMatcher {
 
   @override
   bool matches(Document document, DocumentNode node) {
-    return document.getNodeIndex(node) == _index;
+    return document.getNodeIndexById(node.id) == _index;
   }
 }
 
@@ -273,16 +269,12 @@ class CascadingPadding {
   int get hashCode => left.hashCode ^ right.hashCode ^ top.hashCode ^ bottom.hashCode;
 }
 
-/// Styles applied to the user's selection, e.g., caret, selected text.
+/// Styles applied to the user's selection, e.g., selected text.
 class SelectionStyles {
   const SelectionStyles({
-    required this.caretColor,
     required this.selectionColor,
     this.highlightEmptyTextBlocks = true,
   });
-
-  /// The color of the caret.
-  final Color caretColor;
 
   /// The color of selection rectangles.
   final Color selectionColor;
@@ -290,4 +282,15 @@ class SelectionStyles {
   /// Whether to show a small highlight at the beginning of an
   /// empty block of text, when the user selects multiple blocks.
   final bool highlightEmptyTextBlocks;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SelectionStyles &&
+          runtimeType == other.runtimeType &&
+          selectionColor == other.selectionColor &&
+          highlightEmptyTextBlocks == other.highlightEmptyTextBlocks;
+
+  @override
+  int get hashCode => selectionColor.hashCode ^ highlightEmptyTextBlocks.hashCode;
 }

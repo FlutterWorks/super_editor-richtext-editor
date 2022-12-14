@@ -1,7 +1,17 @@
 name: super_editor
 description: Configurable, composable, extensible text editor and document renderer for Flutter.
-version: 0.2.0
+version: 0.2.3-dev.1
 homepage: https://github.com/superlistapp/super_editor
+
+screenshots:
+  - description: 'SuperEditor on Mac desktop'
+    path: doc/marketing/screenshot_mac_desktop.png
+  - description: 'SuperEditor dark mode'
+    path: doc/marketing/screenshot_mac_desktop_dark-mode.png
+  - description: 'SuperEditor text selection'
+    path: doc/marketing/screenshot_mac_desktop_text-selection.png
+  - description: 'SuperEditor text styles'
+    path: doc/marketing/screenshot_mac_desktop_bold-selection.png
 
 environment:
   sdk: ">=2.12.0 <3.0.0"
@@ -11,23 +21,39 @@ dependencies:
   flutter:
     sdk: flutter
 
-  attributed_text:
-    path: ../attributed_text
+  attributed_text: ^0.2.0
   characters: ^1.2.0
   collection: ^1.15.0
   http: ^0.13.1
   linkify: ^4.0.0
   logging: ^1.0.1
-  flutter_lints: ^1.0.0
-  flutter_test:
-    sdk: flutter
-  super_selectable_text:
-    path: ../super_selectable_text
+  super_text_layout: ^0.1.4
   uuid: ^3.0.3
 
+  # Dependencies for testing tools that we ship with super_editor
+  flutter_test:
+    sdk: flutter
+  flutter_test_robots: ^0.0.17
+
+dependency_overrides:
+  # Override to local mono-repo path so devs can test this repo
+  # against changes that they're making to other mono-repo packages
+  attributed_text:
+    path: ../attributed_text
+  super_text_layout:
+    path: ../super_text_layout
+  flutter_test_robots:
+    git: 
+      url: https://github.com/Flutter-Bounty-Hunters/flutter_test_robots
+
 dev_dependencies:
+  flutter_lints: ^2.0.1
   golden_toolkit: ^0.11.0
   mockito: ^5.0.4
+  super_editor_markdown:
+    path: ../super_editor_markdown
+  text_table: ^4.0.1
+  meta: ^1.8.0
 
 flutter:
   # no Flutter configuration

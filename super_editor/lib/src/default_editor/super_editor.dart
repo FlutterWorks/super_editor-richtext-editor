@@ -3,17 +3,23 @@ import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart' hide SelectableText;
 import 'package:super_editor/src/core/document.dart';
 import 'package:super_editor/src/core/document_composer.dart';
+import 'package:super_editor/src/core/document_debug_paint.dart';
 import 'package:super_editor/src/core/document_editor.dart';
+import 'package:super_editor/src/core/document_interaction.dart';
 import 'package:super_editor/src/core/document_layout.dart';
 import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/core/styles.dart';
 import 'package:super_editor/src/default_editor/common_editor_operations.dart';
 import 'package:super_editor/src/default_editor/document_gestures_touch_android.dart';
 import 'package:super_editor/src/default_editor/document_gestures_touch_ios.dart';
+import 'package:super_editor/src/default_editor/document_scrollable.dart';
 import 'package:super_editor/src/default_editor/list_items.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/ios_document_controls.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 import 'attributions.dart';
 import 'blockquote.dart';
+import 'document_caret_overlay.dart';
 import 'document_gestures_mouse.dart';
 import 'document_input_ime.dart';
 import 'document_input_keyboard.dart';
@@ -79,7 +85,9 @@ class SuperEditor extends StatefulWidget {
     this.customStylePhases = const [],
     this.inputSource = DocumentInputSource.keyboard,
     this.gestureMode = DocumentGestureMode.mouse,
+    this.androidHandleColor,
     this.androidToolbarBuilder,
+    this.iOSHandleColor,
     this.iOSToolbarBuilder,
     this.createOverlayControlsClipper,
     this.debugPaint = const DebugPaintConfig(),
@@ -89,6 +97,7 @@ class SuperEditor extends StatefulWidget {
         softwareKeyboardHandler = null,
         stylesheet = stylesheet ?? defaultStylesheet,
         selectionStyles = defaultSelectionStyle,
+        documentOverlayBuilders = [const DefaultCaretOverlayBuilder()],
         super(key: key);
 
   @Deprecated("Use unnamed SuperEditor() constructor instead")
@@ -107,7 +116,9 @@ class SuperEditor extends StatefulWidget {
     this.gestureMode = DocumentGestureMode.mouse,
     List<DocumentKeyboardAction>? keyboardActions,
     this.softwareKeyboardHandler,
+    this.androidHandleColor,
     this.androidToolbarBuilder,
+    this.iOSHandleColor,
     this.iOSToolbarBuilder,
     this.createOverlayControlsClipper,
     this.debugPaint = const DebugPaintConfig(),
@@ -115,6 +126,7 @@ class SuperEditor extends StatefulWidget {
   })  : stylesheet = stylesheet ?? defaultStylesheet,
         selectionStyles = selectionStyle ?? defaultSelectionStyle,
         keyboardActions = keyboardActions ?? defaultKeyboardActions,
+        documentOverlayBuilders = [const DefaultCaretOverlayBuilder()],
         componentBuilders = componentBuilders != null
             ? [...componentBuilders, const UnknownComponentBuilder()]
             : [...defaultComponentBuilders, const UnknownComponentBuilder()],
@@ -133,13 +145,16 @@ class SuperEditor extends StatefulWidget {
     this.customStylePhases = const [],
     List<ComponentBuilder>? componentBuilders,
     SelectionStyles? selectionStyle,
-    this.inputSource = DocumentInputSource.keyboard,
-    this.gestureMode = DocumentGestureMode.mouse,
+    this.inputSource,
+    this.gestureMode,
     List<DocumentKeyboardAction>? keyboardActions,
+    this.softwareKeyboardHandler,
+    this.androidHandleColor,
     this.androidToolbarBuilder,
+    this.iOSHandleColor,
     this.iOSToolbarBuilder,
     this.createOverlayControlsClipper,
-    this.softwareKeyboardHandler,
+    this.documentOverlayBuilders = const [DefaultCaretOverlayBuilder()],
     this.debugPaint = const DebugPaintConfig(),
     this.autofocus = false,
   })  : stylesheet = stylesheet ?? defaultStylesheet,
@@ -195,13 +210,19 @@ class SuperEditor extends StatefulWidget {
   final List<SingleColumnLayoutStylePhase> customStylePhases;
 
   /// The `SuperEditor` input source, e.g., keyboard or Input Method Engine.
-  final DocumentInputSource inputSource;
+  final DocumentInputSource? inputSource;
 
   /// The `SuperEditor` gesture mode, e.g., mouse or touch.
   final DocumentGestureMode? gestureMode;
 
+  /// Color of the text selection drag handles on Android.
+  final Color? androidHandleColor;
+
   /// Builder that creates a floating toolbar when running on Android.
   final WidgetBuilder? androidToolbarBuilder;
+
+  /// Color of the text selection drag handles on iOS.
+  final Color? iOSHandleColor;
 
   /// Builder that creates a floating toolbar when running on iOS.
   final WidgetBuilder? iOSToolbarBuilder;
@@ -217,6 +238,10 @@ class SuperEditor extends StatefulWidget {
 
   /// Contains a [Document] and alters that document as desired.
   final DocumentEditor editor;
+
+  /// Layers that are displayed on top of the document layout, aligned
+  /// with the location and size of the document layout.
+  final List<DocumentLayerBuilder> documentOverlayBuilders;
 
   /// Owns the editor's current selection, the current attributions for
   /// text input, and other transitive editor configurations.
@@ -241,14 +266,15 @@ class SuperEditor extends StatefulWidget {
   final SoftwareKeyboardHandler? softwareKeyboardHandler;
 
   /// Paints some extra visual ornamentation to help with
-  /// debugging, when true.
+  /// debugging.
   final DebugPaintConfig debugPaint;
 
   @override
-  _SuperEditorState createState() => _SuperEditorState();
+  SuperEditorState createState() => SuperEditorState();
 }
 
-class _SuperEditorState extends State<SuperEditor> {
+@visibleForTesting
+class SuperEditorState extends State<SuperEditor> {
   // GlobalKey used to access the [DocumentLayoutState] to figure
   // out where in the document the user taps or drags.
   late GlobalKey _docLayoutKey;
@@ -258,22 +284,32 @@ class _SuperEditorState extends State<SuperEditor> {
   late SingleColumnLayoutSelectionStyler _docLayoutSelectionStyler;
 
   late FocusNode _focusNode;
+  @visibleForTesting
+  FocusNode get focusNode => _focusNode;
+
   late DocumentComposer _composer;
 
+  late AutoScrollController _autoScrollController;
   DocumentPosition? _previousSelectionExtent;
 
-  late EditContext _editContext;
+  @visibleForTesting
+  late EditContext editContext;
   late SoftwareKeyboardHandler _softwareKeyboardHandler;
   final _floatingCursorController = FloatingCursorController();
+
+  @visibleForTesting
+  SingleColumnLayoutPresenter get presenter => _docLayoutPresenter!;
 
   @override
   void initState() {
     super.initState();
 
+    _focusNode = (widget.focusNode ?? FocusNode())..addListener(_onFocusChange);
+
     _composer = widget.composer ?? DocumentComposer();
     _composer.addListener(_updateComposerPreferencesAtSelection);
 
-    _focusNode = (widget.focusNode ?? FocusNode())..addListener(_onFocusChange);
+    _autoScrollController = AutoScrollController();
 
     _docLayoutKey = widget.documentLayoutKey ?? GlobalKey();
 
@@ -282,9 +318,9 @@ class _SuperEditorState extends State<SuperEditor> {
 
     _softwareKeyboardHandler = widget.softwareKeyboardHandler ??
         SoftwareKeyboardHandler(
-          editor: _editContext.editor,
-          composer: _editContext.composer,
-          commonOps: _editContext.commonOps,
+          editor: editContext.editor,
+          composer: editContext.composer,
+          commonOps: editContext.commonOps,
         );
   }
 
@@ -312,19 +348,21 @@ class _SuperEditorState extends State<SuperEditor> {
     if (widget.softwareKeyboardHandler != oldWidget.softwareKeyboardHandler) {
       _softwareKeyboardHandler = widget.softwareKeyboardHandler ??
           SoftwareKeyboardHandler(
-            editor: _editContext.editor,
-            composer: _editContext.composer,
-            commonOps: _editContext.commonOps,
+            editor: editContext.editor,
+            composer: editContext.composer,
+            commonOps: editContext.commonOps,
           );
     }
 
     if (widget.editor != oldWidget.editor) {
       _createEditContext();
       _createLayoutPresenter();
+    } else if (widget.selectionStyles != oldWidget.selectionStyles) {
+      _docLayoutSelectionStyler.selectionStyles = widget.selectionStyles;
     }
 
     if (widget.stylesheet != oldWidget.stylesheet) {
-      // TODO:
+      _docStylesheetStyler.stylesheet = widget.stylesheet;
     }
 
     _recomputeIfLayoutShouldShowCaret();
@@ -346,7 +384,7 @@ class _SuperEditorState extends State<SuperEditor> {
   }
 
   void _createEditContext() {
-    _editContext = EditContext(
+    editContext = EditContext(
       editor: widget.editor,
       composer: _composer,
       getDocumentLayout: () => _docLayoutKey.currentState as DocumentLayout,
@@ -363,7 +401,7 @@ class _SuperEditorState extends State<SuperEditor> {
       _docLayoutPresenter!.dispose();
     }
 
-    final document = _editContext.editor.document;
+    final document = editContext.editor.document;
 
     _docStylesheetStyler = SingleColumnStylesheetStyler(stylesheet: widget.stylesheet);
 
@@ -371,7 +409,7 @@ class _SuperEditorState extends State<SuperEditor> {
 
     _docLayoutSelectionStyler = SingleColumnLayoutSelectionStyler(
       document: document,
-      composer: _editContext.composer,
+      selection: editContext.composer.selectionNotifier,
       selectionStyles: widget.selectionStyles,
     );
 
@@ -425,12 +463,21 @@ class _SuperEditorState extends State<SuperEditor> {
       }
 
       // Inserted text at the very beginning of a text blob assumes the
-      // attributions immediately following it.
-      final allStyles = node.text.getAllAttributionsAt(textPosition.offset + 1);
+      // attributions immediately following it (except links).
+      // TODO: attribution expansion policy should probably be configurable
+      final allStyles = node.text
+          .getAllAttributionsAt(textPosition.offset + 1)
+          .where((attribution) => attribution is! LinkAttribution)
+          .toSet();
       _composer.preferences.addStyles(allStyles);
     } else {
-      // Inserted text assumes the attributions immediately preceding it.
-      final allStyles = node.text.getAllAttributionsAt(textPosition.offset - 1);
+      // Inserted text assumes the attributions immediately preceding it
+      // (except links).
+      // TODO: attribution expansion policy should probably be configurable
+      final allStyles = node.text
+          .getAllAttributionsAt(textPosition.offset - 1)
+          .where((attribution) => attribution is! LinkAttribution)
+          .toSet();
       _composer.preferences.addStyles(allStyles);
     }
   }
@@ -449,11 +496,28 @@ class _SuperEditorState extends State<SuperEditor> {
     }
   }
 
+  /// Returns the [DocumentInputSource] which should be used.
+  ///
+  /// If the `inputSource` is configured, it is used. Otherwise,
+  /// the [DocumentInputSource] is chosen based on the platform.
+  DocumentInputSource get _inputSource {
+    if (widget.inputSource != null) {
+      return widget.inputSource!;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return DocumentInputSource.ime;
+      default:
+        return DocumentInputSource.keyboard;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return _buildInputSystem(
       child: _buildGestureSystem(
-        child: SingleColumnDocumentLayout(
+        documentLayout: SingleColumnDocumentLayout(
           key: _docLayoutKey,
           presenter: _docLayoutPresenter!,
           componentBuilders: widget.componentBuilders,
@@ -468,12 +532,12 @@ class _SuperEditorState extends State<SuperEditor> {
   Widget _buildInputSystem({
     required Widget child,
   }) {
-    switch (widget.inputSource) {
+    switch (_inputSource) {
       case DocumentInputSource.keyboard:
         return DocumentKeyboardInteractor(
           focusNode: _focusNode,
           autofocus: widget.autofocus,
-          editContext: _editContext,
+          editContext: editContext,
           keyboardActions: widget.keyboardActions,
           child: child,
         );
@@ -481,8 +545,9 @@ class _SuperEditorState extends State<SuperEditor> {
         return DocumentImeInteractor(
           focusNode: _focusNode,
           autofocus: widget.autofocus,
-          editContext: _editContext,
+          editContext: editContext,
           softwareKeyboardHandler: _softwareKeyboardHandler,
+          hardwareKeyboardActions: widget.keyboardActions,
           floatingCursorController: _floatingCursorController,
           child: child,
         );
@@ -493,70 +558,142 @@ class _SuperEditorState extends State<SuperEditor> {
   /// with the document, e.g., mouse input on desktop, or touch input
   /// on mobile.
   Widget _buildGestureSystem({
-    required Widget child,
+    required Widget documentLayout,
   }) {
     switch (_gestureMode) {
       case DocumentGestureMode.mouse:
-        return DocumentMouseInteractor(
-          focusNode: _focusNode,
-          editContext: _editContext,
-          scrollController: widget.scrollController,
-          showDebugPaint: widget.debugPaint.gestures,
-          child: child,
-        );
+        return _buildDesktopGestureSystem(documentLayout);
       case DocumentGestureMode.android:
         return AndroidDocumentTouchInteractor(
           focusNode: _focusNode,
-          composer: _editContext.composer,
-          document: _editContext.editor.document,
-          getDocumentLayout: () => _editContext.documentLayout,
+          document: editContext.editor.document,
+          getDocumentLayout: () => editContext.documentLayout,
+          selection: editContext.composer.selectionNotifier,
           scrollController: widget.scrollController,
           documentKey: _docLayoutKey,
+          handleColor: widget.androidHandleColor ?? Theme.of(context).primaryColor,
           popoverToolbarBuilder: widget.androidToolbarBuilder ?? (_) => const SizedBox(),
           createOverlayControlsClipper: widget.createOverlayControlsClipper,
           showDebugPaint: widget.debugPaint.gestures,
-          child: child,
+          child: documentLayout,
         );
       case DocumentGestureMode.iOS:
         return IOSDocumentTouchInteractor(
           focusNode: _focusNode,
-          composer: _editContext.composer,
-          document: _editContext.editor.document,
-          getDocumentLayout: () => _editContext.documentLayout,
+          document: editContext.editor.document,
+          getDocumentLayout: () => editContext.documentLayout,
+          selection: editContext.composer.selectionNotifier,
           scrollController: widget.scrollController,
           documentKey: _docLayoutKey,
+          handleColor: widget.iOSHandleColor ?? Theme.of(context).primaryColor,
           popoverToolbarBuilder: widget.iOSToolbarBuilder ?? (_) => const SizedBox(),
           floatingCursorController: _floatingCursorController,
           createOverlayControlsClipper: widget.createOverlayControlsClipper,
           showDebugPaint: widget.debugPaint.gestures,
-          child: child,
+          child: documentLayout,
         );
     }
   }
+
+  Widget _buildDesktopGestureSystem(Widget documentLayout) {
+    return LayoutBuilder(builder: (context, viewportConstraints) {
+      return DocumentScrollable(
+        autoScroller: _autoScrollController,
+        scrollController: widget.scrollController,
+        scrollingMinimapId: widget.debugPaint.scrollingMinimapId,
+        showDebugPaint: widget.debugPaint.scrolling,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            // When SuperEditor installs its own Viewport, we want the gesture
+            // detection to span throughout the Viewport. Because the gesture
+            // system sits around the DocumentLayout, within the Viewport, we
+            // have to explicitly tell the gesture area to be at least as tall
+            // as the viewport (in case the document content is shorter than
+            // the viewport).
+            minWidth: viewportConstraints.maxWidth < double.infinity ? viewportConstraints.maxWidth : 0,
+            minHeight: viewportConstraints.maxHeight < double.infinity ? viewportConstraints.maxHeight : 0,
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              // A layer that sits beneath the document and handles gestures.
+              // It's beneath the document so that components that include
+              // interactive UI, like a Checkbox, can intercept their own
+              // touch events.
+              Positioned.fill(
+                child: DocumentMouseInteractor(
+                  focusNode: _focusNode,
+                  document: editContext.editor.document,
+                  getDocumentLayout: () => editContext.documentLayout,
+                  selectionChanges: editContext.composer.selectionChanges,
+                  selectionNotifier: editContext.composer.selectionNotifier,
+                  autoScroller: _autoScrollController,
+                  showDebugPaint: widget.debugPaint.gestures,
+                  child: const SizedBox(),
+                ),
+              ),
+              // The document that the user is editing.
+              Align(
+                alignment: Alignment.topCenter,
+                child: Stack(
+                  children: [
+                    documentLayout,
+                    // We display overlay builders in this inner-Stack so that they
+                    // match the document size, rather than the viewport size.
+                    for (final overlayBuilder in widget.documentOverlayBuilders)
+                      Positioned.fill(
+                        child: overlayBuilder.build(context, editContext),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    });
+  }
 }
 
-enum DocumentInputSource {
-  keyboard,
-  ime,
+/// Builds widgets that are displayed at the same position and size as
+/// the document layout within a [SuperEditor].
+abstract class DocumentLayerBuilder {
+  Widget build(BuildContext context, EditContext editContext);
 }
 
-enum DocumentGestureMode {
-  mouse,
-  android,
-  iOS,
+/// A [DocumentLayerBuilder] that's implemented with a given function, so
+/// that simple use-cases don't need to sub-class [DocumentLayerBuilder].
+class FunctionalDocumentLayerBuilder implements DocumentLayerBuilder {
+  const FunctionalDocumentLayerBuilder(this._delegate);
+
+  final Widget Function(BuildContext context, EditContext editContext) _delegate;
+
+  @override
+  Widget build(BuildContext context, EditContext editContext) => _delegate(context, editContext);
 }
 
-/// Configures the aspects of the editor that show debug paint.
-class DebugPaintConfig {
-  const DebugPaintConfig({
-    this.scrolling = false,
-    this.gestures = false,
-    this.layout = false,
-  });
+/// A [DocumentLayerBuilder] that paints a caret at the primary selection extent
+/// in a [SuperEditor].
+class DefaultCaretOverlayBuilder implements DocumentLayerBuilder {
+  const DefaultCaretOverlayBuilder([
+    this.caretStyle = const CaretStyle(
+      width: 2,
+      color: Colors.black,
+    ),
+  ]);
 
-  final bool scrolling;
-  final bool gestures;
-  final bool layout;
+  /// Styles applied to the caret that's painted by this caret overlay.
+  final CaretStyle caretStyle;
+
+  @override
+  Widget build(BuildContext context, EditContext editContext) {
+    return CaretDocumentOverlay(
+      composer: editContext.composer,
+      documentLayoutResolver: () => editContext.documentLayout,
+      caretStyle: caretStyle,
+      document: editContext.editor.document,
+    );
+  }
 }
 
 /// Creates visual components for the standard [SuperEditor].
@@ -577,8 +714,11 @@ final defaultKeyboardActions = <DocumentKeyboardAction>[
   pasteWhenCmdVIsPressed,
   copyWhenCmdCIsPressed,
   cutWhenCmdXIsPressed,
+  collapseSelectionWhenEscIsPressed,
   selectAllWhenCmdAIsPressed,
   moveUpDownLeftAndRightWithArrowKeys,
+  moveToLineStartWithHome,
+  moveToLineEndWithEnd,
   tabToIndentListItem,
   shiftTabToUnIndentListItem,
   backspaceToUnIndentListItem,
@@ -589,16 +729,44 @@ final defaultKeyboardActions = <DocumentKeyboardAction>[
   enterToInsertBlockNewline,
   backspaceToRemoveUpstreamContent,
   deleteToRemoveDownstreamContent,
+  moveToLineStartOrEndWithCtrlAOrE,
+  deleteLineWithCmdBksp,
+  deleteWordWithAltBksp,
   anyCharacterOrDestructiveKeyToDeleteSelection,
   anyCharacterToInsertInParagraph,
   anyCharacterToInsertInTextContent,
+];
+
+/// Keyboard actions for a [SuperEditor] running with IME on
+/// desktop.
+///
+/// Using the IME on desktop involves partial input from the IME
+/// and partial input from non-content keys, like arrow keys.
+final defaultImeKeyboardActions = <DocumentKeyboardAction>[
+  doNothingWhenThereIsNoSelection,
+  pasteWhenCmdVIsPressed,
+  copyWhenCmdCIsPressed,
+  cutWhenCmdXIsPressed,
+  selectAllWhenCmdAIsPressed,
+  moveUpDownLeftAndRightWithArrowKeys,
+  moveToLineStartWithHome,
+  moveToLineEndWithEnd,
+  tabToIndentListItem,
+  shiftTabToUnIndentListItem,
+  backspaceToUnIndentListItem,
+  backspaceToClearParagraphBlockType,
+  cmdBToToggleBold,
+  cmdIToToggleItalics,
+  shiftEnterToInsertNewlineInBlock,
+  backspaceToRemoveUpstreamContent,
+  deleteToRemoveDownstreamContent,
 ];
 
 /// Stylesheet applied to all [SuperEditor]s by default.
 final defaultStylesheet = Stylesheet(
   rules: [
     StyleRule(
-      const BlockSelector.all(),
+      BlockSelector.all,
       (doc, docNode) {
         return {
           "maxWidth": 640.0,
@@ -691,7 +859,20 @@ final defaultStylesheet = Stylesheet(
       },
     ),
     StyleRule(
-      const BlockSelector.all().last(),
+      const BlockSelector("blockquote"),
+      (doc, docNode) {
+        return {
+          "textStyle": const TextStyle(
+            color: Colors.grey,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            height: 1.4,
+          ),
+        };
+      },
+    ),
+    StyleRule(
+      BlockSelector.all.last(),
       (doc, docNode) {
         return {
           "padding": const CascadingPadding.only(bottom: 96),
@@ -743,6 +924,5 @@ TextStyle defaultStyleBuilder(Set<Attribution> attributions) {
 
 /// Default visual styles related to content selection.
 const defaultSelectionStyle = SelectionStyles(
-  caretColor: Colors.black,
   selectionColor: Color(0xFFACCEF7),
 );

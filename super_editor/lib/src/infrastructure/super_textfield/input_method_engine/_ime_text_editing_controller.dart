@@ -1,5 +1,4 @@
 import 'package:attributed_text/attributed_text.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
@@ -27,9 +26,8 @@ final _log = imeTextFieldLog;
 /// By default, an [ImeAttributedTextEditingController] is not connected to the platform
 /// IME. To connect to the IME, call `attachToIme`. To detach from the IME, call
 /// `detachFromIme`.
-class ImeAttributedTextEditingController
-    with ChangeNotifier
-    implements AttributedTextEditingController, DeltaTextInputClient {
+class ImeAttributedTextEditingController extends AttributedTextEditingController
+    with TextInputClient, DeltaTextInputClient {
   ImeAttributedTextEditingController({
     AttributedTextEditingController? controller,
     bool disposeClientController = true,
@@ -50,6 +48,9 @@ class ImeAttributedTextEditingController
   }
 
   final AttributedTextEditingController _realController;
+
+  @Deprecated("this property is exposed temporarily as super_editor evaluates what to do with controllers")
+  AttributedTextEditingController get innerController => _realController;
 
   final bool _disposeClientController;
 
@@ -81,6 +82,7 @@ class ImeAttributedTextEditingController
     bool autocorrect = true,
     bool enableSuggestions = true,
     TextInputAction textInputAction = TextInputAction.done,
+    TextInputType textInputType = TextInputType.text,
   }) {
     if (isAttachedToIme) {
       // We're already connected to the IME.
@@ -94,6 +96,7 @@ class ImeAttributedTextEditingController
           enableDeltaModel: true,
           enableSuggestions: enableSuggestions,
           inputAction: textInputAction,
+          inputType: textInputType,
         ));
     _inputConnection!
       ..show()
@@ -105,6 +108,7 @@ class ImeAttributedTextEditingController
     bool autocorrect = true,
     bool enableSuggestions = true,
     TextInputAction textInputAction = TextInputAction.done,
+    TextInputType textInputType = TextInputType.text,
   }) {
     if (!isAttachedToIme) {
       // We're not attached to the IME, so there is nothing to update.
@@ -122,6 +126,7 @@ class ImeAttributedTextEditingController
           enableDeltaModel: true,
           enableSuggestions: enableSuggestions,
           inputAction: textInputAction,
+          inputType: textInputType,
         ));
     _inputConnection!
       ..show()
@@ -190,6 +195,7 @@ class ImeAttributedTextEditingController
 
   void Function(TextInputAction)? _onPerformActionPressed;
   set onPerformActionPressed(Function(TextInputAction)? callback) => _onPerformActionPressed = callback;
+  Function(TextInputAction)? get onPerformActionPressed => _onPerformActionPressed;
 
   @override
   TextEditingValue? get currentTextEditingValue => TextEditingValue(
@@ -307,6 +313,11 @@ class ImeAttributedTextEditingController
     _inputConnection = null;
     _latestPlatformTextEditingValue = null;
   }
+
+  @override
+  void performSelector(String selectorName) {
+    // TODO: implement this method starting with Flutter 3.3.4
+  }
   //------ End TextInputClient -----
 
   @override
@@ -386,6 +397,9 @@ class ImeAttributedTextEditingController
       newComposingRegion: newComposingRegion,
     );
   }
+
+  @override
+  void insertNewline() => _realController.insertNewline();
 
   @override
   void insertAtCaret({required String text, TextRange? newComposingRegion}) {

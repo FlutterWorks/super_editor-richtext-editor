@@ -1,6 +1,5 @@
 import 'dart:ui' as ui;
 
-import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,7 +10,7 @@ void main() {
   group('SuperEditor', () {
     group('mobile selection', () {
       group('Android', () {
-        testParagraphSelection(
+        _testParagraphSelection(
           'single tap text',
           DocumentGestureMode.android,
           "mobile-selection_android_single-tap-text",
@@ -29,7 +28,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag collapsed handle upstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-collapsed-upstream",
@@ -77,7 +76,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag collapsed handle downstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-collapsed-downstream",
@@ -125,7 +124,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'double tap text',
           DocumentGestureMode.android,
           "mobile-selection_android_double-tap-text",
@@ -159,7 +158,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'triple tap text',
           DocumentGestureMode.android,
           "mobile-selection_android_trip-tap-text",
@@ -193,7 +192,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag base handle upstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-base-upstream",
@@ -246,7 +245,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag extent handle upstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-extent-upstream",
@@ -298,7 +297,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag extent handle downstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-extent-downstream",
@@ -352,7 +351,7 @@ void main() {
       });
 
       group('iOS', () {
-        testParagraphSelection(
+        _testParagraphSelection(
           'single tap text',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_single-tap-text",
@@ -382,7 +381,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag collapsed handle upstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-collapsed-upstream",
@@ -433,7 +432,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag collapsed handle downstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-collapsed-downstream",
@@ -484,7 +483,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'double tap text',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_double-tap-text",
@@ -518,7 +517,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'triple tap text',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_trip-tap-text",
@@ -552,7 +551,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag base handle upstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-base-upstream",
@@ -605,7 +604,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag extent handle upstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-extent-upstream",
@@ -657,7 +656,7 @@ void main() {
           },
         );
 
-        testParagraphSelection(
+        _testParagraphSelection(
           'drag extent handle downstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-extent-downstream",
@@ -715,7 +714,7 @@ void main() {
 
 /// Pumps a single-paragraph document into the WidgetTester and then hands control
 /// to the given [test] method.
-void testParagraphSelection(
+void _testParagraphSelection(
   String description,
   DocumentGestureMode platform,
   String goldenName,
@@ -726,8 +725,8 @@ void testParagraphSelection(
   testGoldens(description, (tester) async {
     tester.binding.window
       ..physicalSizeTestValue = const Size(800, 200)
-      ..textScaleFactorTestValue = 1.0
       ..devicePixelRatioTestValue = 1.0;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.0;
 
     final dragLine = ValueNotifier<_Line?>(null);
 
@@ -767,7 +766,7 @@ Widget _buildScaffold({
   required ValueNotifier<_Line?> dragLine,
   required Widget child,
 }) {
-  return DragLinePaint(
+  return _DragLinePaint(
     line: dragLine,
     child: MaterialApp(
       home: Scaffold(
@@ -809,8 +808,8 @@ MutableDocument _createSingleParagraphDoc() {
   );
 }
 
-class DragLinePaint extends StatelessWidget {
-  const DragLinePaint({
+class _DragLinePaint extends StatelessWidget {
+  const _DragLinePaint({
     Key? key,
     required this.line,
     required this.child,
@@ -825,7 +824,7 @@ class DragLinePaint extends StatelessWidget {
       valueListenable: line,
       builder: (context, line, child) {
         return CustomPaint(
-          foregroundPainter: line != null ? DragLinePainter(line: line) : null,
+          foregroundPainter: line != null ? _DragLinePainter(line: line) : null,
           child: child,
         );
       },
@@ -834,8 +833,8 @@ class DragLinePaint extends StatelessWidget {
   }
 }
 
-class DragLinePainter extends CustomPainter {
-  DragLinePainter({
+class _DragLinePainter extends CustomPainter {
+  _DragLinePainter({
     required _Line line,
   })  : _line = line,
         _paint = Paint();
@@ -863,7 +862,7 @@ class DragLinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(DragLinePainter oldDelegate) {
+  bool shouldRepaint(_DragLinePainter oldDelegate) {
     return _line != oldDelegate._line;
   }
 }

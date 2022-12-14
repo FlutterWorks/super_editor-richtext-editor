@@ -12,7 +12,7 @@ class MultiListenableBuilder extends StatefulWidget {
   final WidgetBuilder builder;
 
   @override
-  _MultiListenableBuilderState createState() => _MultiListenableBuilderState();
+  State createState() => _MultiListenableBuilderState();
 }
 
 class _MultiListenableBuilderState extends State<MultiListenableBuilder> {
@@ -77,13 +77,13 @@ class ListenableBuilder extends StatelessWidget {
   }) : super(key: key);
 
   final Listenable listenable;
-  final WidgetBuilder builder;
+  final TransitionBuilder builder;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: listenable,
-      builder: (context, _) => builder(context),
+      builder: builder,
     );
   }
 }

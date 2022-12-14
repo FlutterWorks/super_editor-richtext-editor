@@ -2,7 +2,7 @@ import 'dart:math';
 
 import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ListenableBuilder;
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document.dart';
 import 'package:super_editor/src/core/document_composer.dart';
@@ -10,14 +10,17 @@ import 'package:super_editor/src/core/document_editor.dart';
 import 'package:super_editor/src/core/document_selection.dart';
 import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/default_editor/common_editor_operations.dart';
-import 'package:super_editor/src/default_editor/document_gestures_touch_ios.dart';
 import 'package:super_editor/src/default_editor/paragraph.dart';
 import 'package:super_editor/src/default_editor/selection_upstream_downstream.dart';
 import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
+import 'package:super_editor/src/infrastructure/ime_input_owner.dart';
+import 'package:super_editor/src/infrastructure/keyboard.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/ios_document_controls.dart';
 
 import 'attributions.dart';
+import 'document_input_keyboard.dart';
 import 'list_items.dart';
 
 /// Governs document input that comes from the operating system's
@@ -38,22 +41,40 @@ class DocumentImeInteractor extends StatefulWidget {
     this.autofocus = false,
     required this.editContext,
     required this.softwareKeyboardHandler,
+    this.hardwareKeyboardActions = const [],
     this.floatingCursorController,
     required this.child,
   }) : super(key: key);
 
   final FocusNode? focusNode;
+
   final bool autofocus;
+
   final EditContext editContext;
+
   final SoftwareKeyboardHandler softwareKeyboardHandler;
+
+  /// All the actions that the user can execute with physical hardware
+  /// keyboard keys.
+  ///
+  /// [keyboardActions] operates as a Chain of Responsibility. Starting
+  /// from the beginning of the list, a [DocumentKeyboardAction] is
+  /// given the opportunity to handle the currently pressed keys. If that
+  /// [DocumentKeyboardAction] reports the keys as handled, then execution
+  /// stops. Otherwise, execution continues to the next [DocumentKeyboardAction].
+  final List<DocumentKeyboardAction> hardwareKeyboardActions;
+
   final FloatingCursorController? floatingCursorController;
+
   final Widget child;
 
   @override
-  _DocumentImeInteractorState createState() => _DocumentImeInteractorState();
+  State createState() => _DocumentImeInteractorState();
 }
 
-class _DocumentImeInteractorState extends State<DocumentImeInteractor> implements DeltaTextInputClient {
+class _DocumentImeInteractorState extends State<DocumentImeInteractor>
+    with TextInputClient, DeltaTextInputClient
+    implements ImeInputOwner {
   late FocusNode _focusNode;
 
   TextInputConnection? _inputConnection;
@@ -101,6 +122,9 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
     super.dispose();
   }
 
+  @override
+  DeltaTextInputClient get imeClient => this;
+
   void _onFocusChange() {
     if (_focusNode.hasFocus) {
       editorImeLog.info('Gained focus');
@@ -118,10 +142,15 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
     if (selection == null) {
       _detachFromIme();
     } else {
-      if (isAttachedToIme) {
+      if (isAttachedToIme && !_isApplyingDeltas) {
+        // Note: ^ We don't re-serialize and send to IME while we're in the middle
+        // of applying deltas because we might be in an inconsistent state. A sync
+        // will be done when all the deltas have been applied.
         _inputConnection!.show();
+        editorImeLog.fine(
+            "Document composer changed while attached to IME. Re-serializing the document and sending to the IME.");
         _syncImeWithDocumentAndComposer();
-      } else {
+      } else if (!isAttachedToIme) {
         _attachToIme();
       }
     }
@@ -194,6 +223,7 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
   @override
   TextEditingValue get currentTextEditingValue => _currentTextEditingValue;
   TextEditingValue _currentTextEditingValue = const TextEditingValue();
+  DocumentImeSerializer? _currentImeSerialization;
   TextEditingValue? _lastTextEditingValueSentToOs;
   set currentTextEditingValue(TextEditingValue newValue) {
     _currentTextEditingValue = newValue;
@@ -210,14 +240,35 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
 
   bool _isApplyingDeltas = false;
 
-  void _syncImeWithDocumentAndComposer() {
+  void _syncImeWithDocumentAndComposer([TextRange? newComposingRegion]) {
     final selection = widget.editContext.composer.selection;
     if (selection != null) {
-      editorImeLog.fine("Syncing IME with Doc and Composer");
-      currentTextEditingValue = DocumentImeSerializer(
+      editorImeLog.fine("Syncing IME with Doc and Composer, given composing region: $newComposingRegion");
+
+      final newDocSerialization = DocumentImeSerializer(
         widget.editContext.editor.document,
         selection,
-      ).toTextEditingValue();
+      );
+
+      editorImeLog.fine("Previous doc serialization did prepend? ${_currentImeSerialization?.didPrependPlaceholder}");
+      editorImeLog.fine("Desired composing region: $newComposingRegion");
+      editorImeLog.fine("Did new doc prepend placeholder? ${newDocSerialization.didPrependPlaceholder}");
+      TextRange composingRegion = newComposingRegion ?? currentTextEditingValue.composing;
+      if (_currentImeSerialization != null &&
+          _currentImeSerialization!.didPrependPlaceholder &&
+          composingRegion.isValid &&
+          !newDocSerialization.didPrependPlaceholder) {
+        // The IME's desired composing region includes the prepended placeholder.
+        // The updated IME value doesn't have a prepended placeholder, adjust
+        // the composing region bounds.
+        composingRegion = TextRange(
+          start: composingRegion.start - 2,
+          end: composingRegion.end - 2,
+        );
+      }
+
+      _currentImeSerialization = newDocSerialization;
+      currentTextEditingValue = newDocSerialization.toTextEditingValue().copyWith(composing: composingRegion);
     }
   }
 
@@ -243,7 +294,8 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
     widget.softwareKeyboardHandler.applyDeltas(textEditingDeltas);
     _isApplyingDeltas = false;
 
-    _syncImeWithDocumentAndComposer();
+    editorImeLog.fine("Done applying deltas. Serializing the document and sending to IME.");
+    _syncImeWithDocumentAndComposer(textEditingDeltas.last.composing);
 
     editorImeLog.fine("IME value after applying deltas: $currentTextEditingValue");
 
@@ -286,6 +338,11 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
   }
 
   @override
+  void performSelector(String selectorName) {
+    // TODO: implement this method starting with Flutter 3.3.4
+  }
+
+  @override
   void performPrivateCommand(String action, Map<String, dynamic> data) {
     // TODO: implement performPrivateCommand
   }
@@ -314,11 +371,38 @@ class _DocumentImeInteractorState extends State<DocumentImeInteractor> implement
     _inputConnection = null;
   }
 
+  KeyEventResult _onKeyPressed(FocusNode node, RawKeyEvent keyEvent) {
+    if (keyEvent is! RawKeyDownEvent) {
+      editorKeyLog.finer("Received key event, but ignoring because it's not a down event: $keyEvent");
+      return KeyEventResult.handled;
+    }
+
+    editorKeyLog.info("Handling key press: $keyEvent");
+    ExecutionInstruction instruction = ExecutionInstruction.continueExecution;
+    int index = 0;
+    while (instruction == ExecutionInstruction.continueExecution && index < widget.hardwareKeyboardActions.length) {
+      instruction = widget.hardwareKeyboardActions[index](
+        editContext: widget.editContext,
+        keyEvent: keyEvent,
+      );
+      index += 1;
+    }
+
+    switch (instruction) {
+      case ExecutionInstruction.haltExecution:
+        return KeyEventResult.handled;
+      case ExecutionInstruction.continueExecution:
+      case ExecutionInstruction.blocked:
+        return KeyEventResult.ignored;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
       focusNode: _focusNode,
       autofocus: widget.autofocus,
+      onKey: widget.hardwareKeyboardActions.isEmpty ? null : _onKeyPressed,
       child: widget.child,
     );
   }
@@ -407,17 +491,17 @@ class DocumentImeSerializer {
     // the IME would assume that there's no content before the current node and
     // therefore it wouldn't report the backspace button.
     final selectedNode = _doc.getNode(_selection.extent)!;
-    final selectedNodeIndex = _doc.getNodeIndex(selectedNode);
+    final selectedNodeIndex = _doc.getNodeIndexById(selectedNode.id);
     return selectedNodeIndex > 0 &&
         _selection.isCollapsed &&
         _selection.extent.nodePosition == selectedNode.beginningPosition;
   }
 
-  bool get _didPrependPlaceholder => _prependedPlaceholder.isNotEmpty;
+  bool get didPrependPlaceholder => _prependedPlaceholder.isNotEmpty;
 
   DocumentSelection? imeToDocumentSelection(TextSelection imeSelection) {
     editorImeLog.fine("Creating doc selection from IME selection: $imeSelection");
-    if (_didPrependPlaceholder &&
+    if (didPrependPlaceholder &&
         ((!imeSelection.isCollapsed && imeSelection.start < _prependedPlaceholder.length) ||
             (imeSelection.isCollapsed && imeSelection.extentOffset <= _prependedPlaceholder.length))) {
       // The IME is trying to select our artificial prepended character.
@@ -441,19 +525,26 @@ class DocumentImeSerializer {
       editorImeLog.fine("Mapping the IME base/extent to their corresponding doc positions without modification.");
     }
 
+    final base = _imeToDocumentPosition(
+      imeSelection.base,
+      isUpstream: imeSelection.base.affinity == TextAffinity.upstream,
+    );
+    final extent = _imeToDocumentPosition(
+      imeSelection.extent,
+      isUpstream: imeSelection.extent.affinity == TextAffinity.upstream,
+    );
+
+    if (base == null || extent == null) {
+      return null;
+    }
+
     return DocumentSelection(
-      base: _imeToDocumentPosition(
-        imeSelection.base,
-        isUpstream: imeSelection.base.affinity == TextAffinity.upstream,
-      ),
-      extent: _imeToDocumentPosition(
-        imeSelection.extent,
-        isUpstream: imeSelection.extent.affinity == TextAffinity.upstream,
-      ),
+      base: base,
+      extent: extent,
     );
   }
 
-  DocumentPosition _imeToDocumentPosition(TextPosition imePosition, {required bool isUpstream}) {
+  DocumentPosition? _imeToDocumentPosition(TextPosition imePosition, {required bool isUpstream}) {
     for (final range in _imeRangesToDocTextNodes.keys) {
       if (imePosition.offset >= range.start && imePosition.offset <= range.end) {
         final node = _doc.getNodeById(_imeRangesToDocTextNodes[range]!)!;
@@ -483,7 +574,7 @@ class DocumentImeSerializer {
 
     editorImeLog.shout(
         "Couldn't map an IME position to a document position. IME position: $imePosition. The selected offset range is: ${_imeRangesToDocTextNodes.keys.last.start} -> ${_imeRangesToDocTextNodes.keys.last.end}");
-    throw Exception("Couldn't map an IME position to a document position. IME position: $imePosition");
+    return null;
   }
 
   TextSelection documentToImeSelection(DocumentSelection docSelection) {
@@ -556,16 +647,16 @@ class DocumentImeSerializer {
   /// If there is no text content within the [selection], `null` is returned.
   DocumentSelection? _constrictToTextSelectionEndCaps(DocumentSelection selection) {
     final baseNode = _doc.getNodeById(selection.base.nodeId)!;
-    final baseNodeIndex = _doc.getNodeIndex(baseNode);
+    final baseNodeIndex = _doc.getNodeIndexById(baseNode.id);
     final extentNode = _doc.getNodeById(selection.extent.nodeId)!;
-    final extentNodeIndex = _doc.getNodeIndex(extentNode);
+    final extentNodeIndex = _doc.getNodeIndexById(extentNode.id);
 
     final startNode = baseNodeIndex <= extentNodeIndex ? baseNode : extentNode;
-    final startNodeIndex = _doc.getNodeIndex(startNode);
+    final startNodeIndex = _doc.getNodeIndexById(startNode.id);
     final startPosition =
         baseNodeIndex <= extentNodeIndex ? selection.base.nodePosition : selection.extent.nodePosition;
     final endNode = baseNodeIndex <= extentNodeIndex ? extentNode : baseNode;
-    final endNodeIndex = _doc.getNodeIndex(endNode);
+    final endNodeIndex = _doc.getNodeIndexById(endNode.id);
     final endPosition = baseNodeIndex <= extentNodeIndex ? selection.extent.nodePosition : selection.base.nodePosition;
 
     if (startNodeIndex == endNodeIndex) {
@@ -640,16 +731,16 @@ class DocumentImeSerializer {
   /// so that the IME sends us the delete delta.
   String _getMinimumTextForIME(DocumentSelection selection) {
     final baseNode = _doc.getNodeById(selection.base.nodeId)!;
-    final baseNodeIndex = _doc.getNodeIndex(baseNode);
+    final baseNodeIndex = _doc.getNodeIndexById(baseNode.id);
     final extentNode = _doc.getNodeById(selection.extent.nodeId)!;
-    final extentNodeIndex = _doc.getNodeIndex(extentNode);
+    final extentNodeIndex = _doc.getNodeIndexById(extentNode.id);
 
     final selectionStartNode = baseNodeIndex <= extentNodeIndex ? baseNode : extentNode;
-    final selectionStartNodeIndex = _doc.getNodeIndex(selectionStartNode);
+    final selectionStartNodeIndex = _doc.getNodeIndexById(selectionStartNode.id);
     final startNodeIndex = max(selectionStartNodeIndex - 1, 0);
 
     final selectionEndNode = baseNodeIndex <= extentNodeIndex ? extentNode : baseNode;
-    final selectionEndNodeIndex = _doc.getNodeIndex(selectionEndNode);
+    final selectionEndNodeIndex = _doc.getNodeIndexById(selectionEndNode.id);
     final endNodeIndex = min(selectionEndNodeIndex + 1, _doc.nodes.length - 1);
 
     final buffer = StringBuffer();
@@ -773,14 +864,20 @@ class SoftwareKeyboardHandler {
 
     if (delta.textInserted == "\n") {
       // On iOS, newlines are reported here and also to performAction().
-      // On Android, newlines are only reported here. So, on Android only,
+      // On Android and web, newlines are only reported here. So, on Android and web,
       // we forward the newline action to performAction.
-      if (defaultTargetPlatform == TargetPlatform.android) {
+      if (defaultTargetPlatform == TargetPlatform.android || kIsWeb) {
         editorImeLog.fine("Received a newline insertion on Android. Forwarding to newline input action.");
         performAction(TextInputAction.newline);
       } else {
         editorImeLog.fine("Skipping insertion delta because its a newline");
       }
+      return;
+    }
+
+    if (delta.textInserted == "\t" && (defaultTargetPlatform == TargetPlatform.iOS)) {
+      // On iOS, tabs pressed at the the software keyboard are reported here.
+      commonOps.indentListItem();
       return;
     }
 
@@ -803,14 +900,20 @@ class SoftwareKeyboardHandler {
 
     if (delta.replacementText == "\n") {
       // On iOS, newlines are reported here and also to performAction().
-      // On Android, newlines are only reported here. So, on Android only,
+      // On Android and web, newlines are only reported here. So, on Android and web,
       // we forward the newline action to performAction.
-      if (defaultTargetPlatform == TargetPlatform.android) {
+      if (defaultTargetPlatform == TargetPlatform.android || kIsWeb) {
         editorImeLog.fine("Received a newline replacement on Android. Forwarding to newline input action.");
         performAction(TextInputAction.newline);
       } else {
         editorImeLog.fine("Skipping replacement delta because its a newline");
       }
+      return;
+    }
+
+    if (delta.replacementText == "\t" && (defaultTargetPlatform == TargetPlatform.iOS)) {
+      // On iOS, tabs pressed at the the software keyboard are reported here.
+      commonOps.indentListItem();
       return;
     }
 
@@ -836,7 +939,19 @@ class SoftwareKeyboardHandler {
     // editorImeLog.fine("App-side composing - ${currentTextEditingValue.composing}");
     editorImeLog.fine("OS-side selection - ${delta.selection}");
     editorImeLog.fine("OS-side composing - ${delta.composing}");
-    // currentTextEditingValue = _currentTextEditingValue.copyWith(composing: delta.composing);
+
+    final docSerializer = DocumentImeSerializer(
+      editor.document,
+      composer.selection!,
+    );
+
+    final docSelection = docSerializer.imeToDocumentSelection(delta.selection);
+    if (docSelection != null) {
+      // We got a selection from the platform.
+      // This could happen in some software keyboards, like GBoard,
+      // where the user can swipe over the spacebar to change the selection.
+      composer.selection = docSelection;
+    }
   }
 
   void insert(TextPosition insertionPosition, String textInserted) {
@@ -1127,7 +1242,7 @@ class KeyboardEditingToolbar extends StatelessWidget {
                     scrollDirection: Axis.horizontal,
                     child: ListenableBuilder(
                         listenable: composer,
-                        builder: (context) {
+                        builder: (context, _) {
                           final selectedNode = document.getNodeById(selection.extent.nodeId);
                           final isSingleNodeSelected = selection.extent.nodeId == selection.base.nodeId;
 

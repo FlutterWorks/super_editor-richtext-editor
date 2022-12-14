@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/multi_tap_gesture.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/super_textfield.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 import '_editing_controls.dart';
 
@@ -43,7 +43,7 @@ class AndroidTextFieldTouchInteractor extends StatefulWidget {
     required this.textController,
     required this.editingOverlayController,
     required this.textScrollController,
-    required this.selectableTextKey,
+    required this.textKey,
     required this.isMultiline,
     required this.handleColor,
     this.showDebugPaint = false,
@@ -67,16 +67,15 @@ class AndroidTextFieldTouchInteractor extends StatefulWidget {
   /// [TextController] used to read the current selection to display
   /// editing controls, and used to update the selection based on
   /// user interactions.
-  final AttributedTextEditingController textController;
+  final ImeAttributedTextEditingController textController;
 
   final AndroidEditingOverlayController editingOverlayController;
 
   final TextScrollController textScrollController;
 
-  /// [GlobalKey] that references the [SuperSelectableText] that lays out
-  /// and renders the text within the text field that owns this
-  /// [AndroidTextFieldInteractor].
-  final GlobalKey<SuperSelectableTextState> selectableTextKey;
+  /// [GlobalKey] that references the widget that contains the text within
+  /// this [AndroidTextFieldTouchInteractor].
+  final GlobalKey<ProseTextState> textKey;
 
   /// Whether the text field that owns this [AndroidTextFieldInteractor] is
   /// a multiline text field.
@@ -98,8 +97,6 @@ class AndroidTextFieldTouchInteractor extends StatefulWidget {
 class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchInteractor>
     with TickerProviderStateMixin {
   final _textViewportOffsetLink = LayerLink();
-
-  TextSelection? _selectionBeforeSingleTapDown;
 
   // Whether the user is dragging a collapsed selection.
   bool _isDraggingCaret = false;
@@ -131,54 +128,46 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
     super.dispose();
   }
 
-  void _onTapDown(TapDownDetails details) {
-    _log.fine('_onTapDown');
+  ProseTextLayout get _textLayout => widget.textKey.currentState!.textLayout;
 
-    widget.focusNode.requestFocus();
+  void _onTapDown(TapDownDetails details) {
+    _log.fine("User tapped down");
+    if (!widget.focusNode.hasFocus) {
+      _log.finer("Field isn't focused. Ignoring press.");
+      return;
+    }
 
     // When the user drags, the toolbar should not be visible.
     // A drag can begin with a tap down, so we hide the toolbar
     // preemptively.
     widget.editingOverlayController.hideToolbar();
 
-    // Ensure that the collapsed handle is not auto-hidden.
-    widget.editingOverlayController.unHideCollapsedHandle();
-
-    _selectionBeforeSingleTapDown = widget.textController.selection;
-
-    final tapTextPosition = _getTextPositionAtOffset(details.localPosition);
-    if (tapTextPosition == null) {
-      // This shouldn't be possible, but we'll ignore the tap if we can't
-      // map it to a position within the text.
-      _log.warning('received a tap-down event on AndroidTextFieldInteractor that is not on top of any text');
-      return;
-    }
-
-    // Update the text selection to a collapsed selection where the user tapped.
-    widget.textController.selection = tapTextPosition.offset >= 0
-        ? TextSelection.collapsed(offset: tapTextPosition.offset)
-        : const TextSelection.collapsed(offset: 0);
-
-    widget.editingOverlayController.showHandles();
+    _selectAtOffset(details.localPosition);
   }
 
   void _onTapUp(TapUpDetails details) {
-    _log.fine('_onTapUp()');
+    _log.fine('User released a tap');
+
+    if (widget.focusNode.hasFocus && widget.textController.isAttachedToIme) {
+      widget.textController.showKeyboard();
+    } else {
+      widget.focusNode.requestFocus();
+    }
+
     // If the user tapped on a collapsed caret, or tapped on an
     // expanded selection, toggle the toolbar appearance.
-
     final tapTextPosition = _getTextPositionAtOffset(details.localPosition);
     if (tapTextPosition == null) {
-      // This shouldn't be possible, but we'll ignore the tap if we can't
-      // map it to a position within the text.
-      _log.warning('received a tap-up event on AndroidTextFieldInteractor that is not on top of any text');
+      // Place the caret based on the tap offset. In this case, the caret will
+      // be placed at the end of text because the user tapped in empty space.
+      _selectAtOffset(details.localPosition);
       return;
     }
 
-    final didTapOnExistingSelection = widget.textController.selection.isCollapsed
-        ? tapTextPosition == _selectionBeforeSingleTapDown!.extent
-        : tapTextPosition.offset >= _selectionBeforeSingleTapDown!.start &&
-            tapTextPosition.offset <= _selectionBeforeSingleTapDown!.end;
+    final previousSelection = widget.textController.selection;
+    final didTapOnExistingSelection = previousSelection.isCollapsed
+        ? tapTextPosition == previousSelection.extent
+        : tapTextPosition.offset >= previousSelection.start && tapTextPosition.offset <= previousSelection.end;
 
     if (didTapOnExistingSelection) {
       // Toggle the toolbar display when the user taps on the collapsed caret,
@@ -188,6 +177,9 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
       // The user tapped somewhere in the text outside any existing selection.
       // Hide the toolbar.
       widget.editingOverlayController.hideToolbar();
+
+      // Place the caret based on the tap offset.
+      _selectAtOffset(details.localPosition);
     }
 
     // On Android, the collapsed handle should disappear after a few seconds
@@ -197,8 +189,28 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
       ..startCollapsedHandleAutoHideCountdown();
   }
 
+  /// Places the caret in the field's text based on the given [localOffset],
+  /// and displays the drag handle.
+  void _selectAtOffset(Offset localOffset) {
+    // Ensure that the collapsed handle is not auto-hidden.
+    widget.editingOverlayController.unHideCollapsedHandle();
+
+    final tapTextPosition = _getTextPositionAtOffset(localOffset);
+    if (tapTextPosition == null) {
+      // This situation indicates the user tapped in empty space
+      widget.textController.selection = TextSelection.collapsed(offset: widget.textController.text.text.length);
+    } else {
+      // Update the text selection to a collapsed selection where the user tapped.
+      widget.textController.selection = tapTextPosition.offset >= 0
+          ? TextSelection.collapsed(offset: tapTextPosition.offset)
+          : const TextSelection.collapsed(offset: 0);
+    }
+
+    widget.editingOverlayController.showHandles();
+  }
+
   void _onDoubleTapDown(TapDownDetails details) {
-    _log.fine('_onDoubleTapDown()');
+    _log.fine("User double-tapped down");
     widget.focusNode.requestFocus();
 
     final tapTextPosition = _getTextPositionAtOffset(details.localPosition);
@@ -223,11 +235,11 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
   }
 
   void _onTripleTapDown(TapDownDetails details) {
-    _log.fine('_onTripleTapDown()');
-    final tapTextPosition = widget.selectableTextKey.currentState!.getPositionAtOffset(details.localPosition);
+    _log.fine("User triple-tapped down");
+    final tapTextPosition = _textLayout.getPositionAtOffset(details.localPosition)!;
 
-    widget.textController.selection = widget.selectableTextKey.currentState!
-        .expandSelection(tapTextPosition, paragraphExpansionFilter, TextAffinity.downstream);
+    widget.textController.selection =
+        _textLayout.expandSelection(tapTextPosition, paragraphExpansionFilter, TextAffinity.downstream);
 
     if (widget.textController.selection.isCollapsed) {
       // The selection is collapsed. The collapsed handle should disappear
@@ -240,7 +252,7 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
   }
 
   void _onTextPanStart(DragStartDetails details) {
-    _log.fine('_onTextPanStart()');
+    _log.fine("User started a pan");
     setState(() {
       _isDraggingCaret = true;
       _globalDragOffset = details.globalPosition;
@@ -252,7 +264,7 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
-    _log.fine('_onPanUpdate()');
+    _log.finer("User panned to new offset");
 
     if (_isDraggingCaret) {
       widget.textController.selection = TextSelection.collapsed(
@@ -273,7 +285,7 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
   }
 
   void _onPanEnd(DragEndDetails details) {
-    _log.fine('_onPanEnd()');
+    _log.fine("User ended a pan");
     _onHandleDragEnd();
   }
 
@@ -314,7 +326,7 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
       // layout until the end of this frame. Therefore, we schedule a
       // a post frame callback to lookup the new text selection location
       // after the current layout pass.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         widget.textController.selection = TextSelection.collapsed(
           offset: _globalOffsetToTextPosition(_globalDragOffset!).offset,
         );
@@ -325,14 +337,14 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
   /// Converts a screen-level offset to an offset relative to the top-left
   /// corner of the text within this text field.
   Offset _globalOffsetToTextOffset(Offset globalOffset) {
-    final textBox = widget.selectableTextKey.currentContext!.findRenderObject() as RenderBox;
+    final textBox = widget.textKey.currentContext!.findRenderObject() as RenderBox;
     return textBox.globalToLocal(globalOffset);
   }
 
   /// Converts a screen-level offset to a [TextPosition] that sits at that
   /// global offset.
   TextPosition _globalOffsetToTextPosition(Offset globalOffset) {
-    return widget.selectableTextKey.currentState!.getPositionNearestToOffset(
+    return _textLayout.getPositionNearestToOffset(
       _globalOffsetToTextOffset(globalOffset),
     );
   }
@@ -348,15 +360,14 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
     }
 
     final globalOffset = (context.findRenderObject() as RenderBox).localToGlobal(localOffset);
-    final textOffset =
-        (widget.selectableTextKey.currentContext!.findRenderObject() as RenderBox).globalToLocal(globalOffset);
-    return widget.selectableTextKey.currentState!.getPositionAtOffset(textOffset);
+    final textOffset = (widget.textKey.currentContext!.findRenderObject() as RenderBox).globalToLocal(globalOffset);
+    return _textLayout.getPositionNearestToOffset(textOffset);
   }
 
   /// Returns a [TextSelection] that selects the word surrounding the given
   /// [position].
   TextSelection _getWordSelectionAt(TextPosition position) {
-    return widget.selectableTextKey.currentState!.getWordSelectionAt(position);
+    return _textLayout.getWordSelectionAt(position);
   }
 
   @override
@@ -444,11 +455,11 @@ class AndroidTextFieldTouchInteractorState extends State<AndroidTextFieldTouchIn
     // focus on the vertical midpoint of the current extent position.
     // TODO: can we de-dup this with similar calculations in _editing_controls?
     final extentPosition = widget.textController.selection.extent;
-    final textLayout = widget.selectableTextKey.currentState!;
-    final extentOffsetInText = textLayout.getOffsetAtPosition(extentPosition);
-    final extentLineHeight = textLayout.getCharacterBox(extentPosition).toRect().height;
+    final extentOffsetInText = _textLayout.getOffsetAtPosition(extentPosition);
+    final extentLineHeight =
+        _textLayout.getCharacterBox(extentPosition)?.toRect().height ?? _textLayout.estimatedLineHeight;
     final extentGlobalOffset =
-        (widget.selectableTextKey.currentContext!.findRenderObject() as RenderBox).localToGlobal(extentOffsetInText);
+        (widget.textKey.currentContext!.findRenderObject() as RenderBox).localToGlobal(extentOffsetInText);
     final extentOffsetInViewport = (context.findRenderObject() as RenderBox).globalToLocal(extentGlobalOffset);
 
     return Positioned(

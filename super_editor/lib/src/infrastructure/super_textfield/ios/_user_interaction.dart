@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/multi_tap_gesture.dart';
 import 'package:super_editor/src/infrastructure/super_textfield/super_textfield.dart';
-import 'package:super_selectable_text/super_selectable_text.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 import '_editing_controls.dart';
 
@@ -63,16 +63,15 @@ class IOSTextFieldTouchInteractor extends StatefulWidget {
   /// [TextController] used to read the current selection to display
   /// editing controls, and used to update the selection based on
   /// user interactions.
-  final AttributedTextEditingController textController;
+  final ImeAttributedTextEditingController textController;
 
   final IOSEditingOverlayController editingOverlayController;
 
   final TextScrollController textScrollController;
 
-  /// [GlobalKey] that references the [SuperSelectableText] that lays out
-  /// and renders the text within the text field that owns this
-  /// [IOSTextFieldInteractor].
-  final GlobalKey<SuperSelectableTextState> selectableTextKey;
+  /// [GlobalKey] that references the widget that contains the field's
+  /// text.
+  final GlobalKey<ProseTextState> selectableTextKey;
 
   /// Whether the text field that owns this [IOSTextFieldInteractor] is
   /// a multiline text field.
@@ -93,8 +92,6 @@ class IOSTextFieldTouchInteractor extends StatefulWidget {
 
 class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor> with TickerProviderStateMixin {
   final _textViewportOffsetLink = LayerLink();
-
-  TextSelection? _selectionBeforeSingleTapDown;
 
   // Whether the user is dragging a collapsed selection.
   bool _isDraggingCaret = false;
@@ -126,47 +123,52 @@ class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor
     super.dispose();
   }
 
-  void _onTapDown(TapDownDetails details) {
-    _log.fine('_onTapDown');
+  ProseTextLayout get _textLayout => widget.selectableTextKey.currentState!.textLayout;
 
-    widget.focusNode.requestFocus();
+  void _onTapDown(TapDownDetails details) {
+    _log.fine("User tapped down");
+    if (!widget.focusNode.hasFocus) {
+      _log.finer("Field isn't focused. Ignoring press.");
+      return;
+    }
 
     // When the user drags, the toolbar should not be visible.
     // A drag can begin with a tap down, so we hide the toolbar
     // preemptively.
     widget.editingOverlayController.hideToolbar();
 
-    _selectionBeforeSingleTapDown = widget.textController.selection;
-
-    final tapTextPosition = _getTextPositionAtOffset(details.localPosition);
-    if (tapTextPosition == null) {
-      // This shouldn't be possible, but we'll ignore the tap if we can't
-      // map it to a position within the text.
-      _log.warning('received a tap-down event on IOSTextFieldInteractor that is not on top of any text');
-      return;
-    }
-
-    // Update the text selection to a collapsed selection where the user tapped.
-    widget.textController.selection = TextSelection.collapsed(offset: tapTextPosition.offset);
+    _selectAtOffset(details.localPosition);
   }
 
   void _onTapUp(TapUpDetails details) {
-    _log.fine('_onTapUp()');
+    _log.fine('User released a tap');
+
+    if (widget.focusNode.hasFocus && widget.textController.isAttachedToIme) {
+      widget.textController.showKeyboard();
+    } else if (widget.focusNode.hasFocus) {
+      // This situation can happen on iOS web when the user taps outside the field
+      // or clicks on the OK button of the software keyboard.
+      // In this situation, the IME connection is closed but the field remains focused.
+      // We need to attach to IME so the keyboard is displayed again.
+      widget.textController.attachToIme();
+    } else {
+      widget.focusNode.requestFocus();
+    }
+
     // If the user tapped on a collapsed caret, or tapped on an
     // expanded selection, toggle the toolbar appearance.
-
     final tapTextPosition = _getTextPositionAtOffset(details.localPosition);
     if (tapTextPosition == null) {
-      // This shouldn't be possible, but we'll ignore the tap if we can't
-      // map it to a position within the text.
-      _log.warning('received a tap-up event on IOSTextFieldInteractor that is not on top of any text');
+      // Place the caret based on the tap offset. In this case, the caret will
+      // be placed at the end of text because the user tapped in empty space.
+      _selectAtOffset(details.localPosition);
       return;
     }
 
-    final didTapOnExistingSelection = widget.textController.selection.isCollapsed
-        ? tapTextPosition == _selectionBeforeSingleTapDown!.extent
-        : tapTextPosition.offset >= _selectionBeforeSingleTapDown!.start &&
-            tapTextPosition.offset <= _selectionBeforeSingleTapDown!.end;
+    final previousSelection = widget.textController.selection;
+    final didTapOnExistingSelection = previousSelection.isCollapsed
+        ? tapTextPosition == previousSelection.extent
+        : tapTextPosition.offset >= previousSelection.start && tapTextPosition.offset <= previousSelection.end;
 
     if (didTapOnExistingSelection) {
       // Toggle the toolbar display when the user taps on the collapsed caret,
@@ -176,7 +178,24 @@ class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor
       // The user tapped somewhere in the text outside any existing selection.
       // Hide the toolbar.
       widget.editingOverlayController.hideToolbar();
+
+      // Place the caret based on the tap offset.
+      _selectAtOffset(details.localPosition);
     }
+  }
+
+  /// Places the caret in the field's text based on the given [localOffset],
+  /// and displays the drag handle.
+  void _selectAtOffset(Offset localOffset) {
+    final tapTextPosition = _getTextPositionAtOffset(localOffset);
+    if (tapTextPosition == null) {
+      // This situation indicates the user tapped in empty space
+      widget.textController.selection = TextSelection.collapsed(offset: widget.textController.text.text.length);
+      return;
+    }
+
+    // Update the text selection to a collapsed selection where the user tapped.
+    widget.textController.selection = TextSelection.collapsed(offset: tapTextPosition.offset);
   }
 
   void _onDoubleTapDown(TapDownDetails details) {
@@ -203,10 +222,11 @@ class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor
   }
 
   void _onTripleTapDown(TapDownDetails details) {
-    final tapTextPosition = widget.selectableTextKey.currentState!.getPositionAtOffset(details.localPosition);
+    final textLayout = _textLayout;
+    final tapTextPosition = textLayout.getPositionAtOffset(details.localPosition)!;
 
-    widget.textController.selection = widget.selectableTextKey.currentState!
-        .expandSelection(tapTextPosition, paragraphExpansionFilter, TextAffinity.downstream);
+    widget.textController.selection =
+        textLayout.expandSelection(tapTextPosition, paragraphExpansionFilter, TextAffinity.downstream);
   }
 
   void _onTextPanStart(DragStartDetails details) {
@@ -274,7 +294,7 @@ class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor
       // layout until the end of this frame. Therefore, we schedule a
       // a post frame callback to lookup the new text selection location
       // after the current layout pass.
-      WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
         widget.textController.selection = TextSelection.collapsed(
           offset: _globalOffsetToTextPosition(_globalDragOffset!).offset,
         );
@@ -292,7 +312,7 @@ class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor
   /// Converts a screen-level offset to a [TextPosition] that sits at that
   /// global offset.
   TextPosition _globalOffsetToTextPosition(Offset globalOffset) {
-    return widget.selectableTextKey.currentState!.getPositionNearestToOffset(
+    return _textLayout.getPositionNearestToOffset(
       _globalOffsetToTextOffset(globalOffset),
     );
   }
@@ -310,13 +330,13 @@ class IOSTextFieldTouchInteractorState extends State<IOSTextFieldTouchInteractor
     final globalOffset = (context.findRenderObject() as RenderBox).localToGlobal(localOffset);
     final textOffset =
         (widget.selectableTextKey.currentContext!.findRenderObject() as RenderBox).globalToLocal(globalOffset);
-    return widget.selectableTextKey.currentState!.getPositionAtOffset(textOffset);
+    return _textLayout.getPositionNearestToOffset(textOffset);
   }
 
   /// Returns a [TextSelection] that selects the word surrounding the given
   /// [position].
   TextSelection _getWordSelectionAt(TextPosition position) {
-    return widget.selectableTextKey.currentState!.getWordSelectionAt(position);
+    return _textLayout.getWordSelectionAt(position);
   }
 
   @override

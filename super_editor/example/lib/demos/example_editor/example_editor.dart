@@ -1,6 +1,6 @@
 import 'package:example/demos/example_editor/_task.dart';
-import 'package:flutter/foundation.dart';
 import 'package:example/logging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
@@ -28,6 +28,10 @@ class _ExampleEditorState extends State<ExampleEditor> {
 
   late ScrollController _scrollController;
 
+  final _darkBackground = const Color(0xFF222222);
+  final _lightBackground = Colors.white;
+  bool _isLight = true;
+
   OverlayEntry? _textFormatBarOverlayEntry;
   final _textSelectionAnchor = ValueNotifier<Offset?>(null);
 
@@ -39,7 +43,8 @@ class _ExampleEditorState extends State<ExampleEditor> {
     super.initState();
     _doc = createInitialDocument()..addListener(_hideOrShowToolbar);
     _docEditor = DocumentEditor(document: _doc as MutableDocument);
-    _composer = DocumentComposer()..addListener(_hideOrShowToolbar);
+    _composer = DocumentComposer();
+    _composer.selectionNotifier.addListener(_hideOrShowToolbar);
     _docOps = CommonEditorOperations(
       editor: _docEditor,
       composer: _composer,
@@ -128,6 +133,7 @@ class _ExampleEditorState extends State<ExampleEditor> {
       _textFormatBarOverlayEntry ??= OverlayEntry(builder: (context) {
         return EditorToolbar(
           anchor: _textSelectionAnchor,
+          editorFocusNode: _editorFocusNode,
           editor: _docEditor,
           composer: _composer,
           closeToolbar: _hideEditorToolbar,
@@ -135,14 +141,14 @@ class _ExampleEditorState extends State<ExampleEditor> {
       });
 
       // Display the toolbar in the application overlay.
-      final overlay = Overlay.of(context)!;
+      final overlay = Overlay.of(context);
       overlay.insert(_textFormatBarOverlayEntry!);
     }
 
     // Schedule a callback after this frame to locate the selection
     // bounds on the screen and display the toolbar near the selected
     // text.
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (_textFormatBarOverlayEntry == null) {
         return;
       }
@@ -151,8 +157,8 @@ class _ExampleEditorState extends State<ExampleEditor> {
           .getRectForSelection(_composer.selection!.base, _composer.selection!.extent)!;
       final docBox = _docLayoutKey.currentContext!.findRenderObject() as RenderBox;
       final overlayBoundingBox = Rect.fromPoints(
-        docBox.localToGlobal(docBoundingBox.topLeft, ancestor: context.findRenderObject()),
-        docBox.localToGlobal(docBoundingBox.bottomRight, ancestor: context.findRenderObject()),
+        docBox.localToGlobal(docBoundingBox.topLeft),
+        docBox.localToGlobal(docBoundingBox.bottomRight),
       );
 
       _textSelectionAnchor.value = overlayBoundingBox.topCenter;
@@ -172,14 +178,14 @@ class _ExampleEditorState extends State<ExampleEditor> {
       // and non-null implies the entry is in the overlay.
       _textFormatBarOverlayEntry!.remove();
       _textFormatBarOverlayEntry = null;
-    }
 
-    // Ensure that focus returns to the editor.
-    //
-    // I tried explicitly unfocus()'ing the URL textfield
-    // in the toolbar but it didn't return focus to the
-    // editor. I'm not sure why.
-    _editorFocusNode.requestFocus();
+      // Ensure that focus returns to the editor.
+      //
+      // I tried explicitly unfocus()'ing the URL textfield
+      // in the toolbar but it didn't return focus to the
+      // editor. I'm not sure why.
+      _editorFocusNode.requestFocus();
+    }
   }
 
   DocumentGestureMode get _gestureMode {
@@ -202,12 +208,12 @@ class _ExampleEditorState extends State<ExampleEditor> {
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
       case TargetPlatform.iOS:
-        return DocumentInputSource.ime;
       case TargetPlatform.fuchsia:
       case TargetPlatform.linux:
       case TargetPlatform.macOS:
       case TargetPlatform.windows:
-        return DocumentInputSource.keyboard;
+        return DocumentInputSource.ime;
+      // return DocumentInputSource.keyboard;
     }
   }
 
@@ -236,14 +242,14 @@ class _ExampleEditorState extends State<ExampleEditor> {
       });
 
       // Display the toolbar in the application overlay.
-      final overlay = Overlay.of(context)!;
+      final overlay = Overlay.of(context);
       overlay.insert(_imageFormatBarOverlayEntry!);
     }
 
     // Schedule a callback after this frame to locate the selection
     // bounds on the screen and display the toolbar near the selected
     // text.
-    WidgetsBinding.instance!.addPostFrameCallback((timeStamp) {
+    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       if (_imageFormatBarOverlayEntry == null) {
         return;
       }
@@ -252,8 +258,8 @@ class _ExampleEditorState extends State<ExampleEditor> {
           .getRectForSelection(_composer.selection!.base, _composer.selection!.extent)!;
       final docBox = _docLayoutKey.currentContext!.findRenderObject() as RenderBox;
       final overlayBoundingBox = Rect.fromPoints(
-        docBox.localToGlobal(docBoundingBox.topLeft, ancestor: context.findRenderObject()),
-        docBox.localToGlobal(docBoundingBox.bottomRight, ancestor: context.findRenderObject()),
+        docBox.localToGlobal(docBoundingBox.topLeft),
+        docBox.localToGlobal(docBoundingBox.bottomRight),
       );
 
       _imageSelectionAnchor.value = overlayBoundingBox.center;
@@ -273,50 +279,98 @@ class _ExampleEditorState extends State<ExampleEditor> {
       // and non-null implies the entry is in the overlay.
       _imageFormatBarOverlayEntry!.remove();
       _imageFormatBarOverlayEntry = null;
-    }
 
-    // Ensure that focus returns to the editor.
-    _editorFocusNode.requestFocus();
+      // Ensure that focus returns to the editor.
+      _editorFocusNode.requestFocus();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Stack(
       children: [
-        Expanded(
-          child: _buildEditor(),
+        Column(
+          children: [
+            Expanded(
+              child: _buildEditor(),
+            ),
+            if (_isMobile) _buildMountedToolbar(),
+          ],
         ),
-        if (_isMobile) _buildMountedToolbar(),
+        Align(
+          alignment: Alignment.bottomRight,
+          child: _buildLightAndDarkModeToggle(),
+        ),
       ],
     );
   }
 
+  Widget _buildLightAndDarkModeToggle() {
+    return Padding(
+      padding: const EdgeInsets.only(right: 16.0, bottom: 16.0),
+      child: FloatingActionButton(
+        backgroundColor: _isLight ? _darkBackground : _lightBackground,
+        foregroundColor: _isLight ? _lightBackground : _darkBackground,
+        elevation: 5,
+        onPressed: () {
+          setState(() {
+            _isLight = !_isLight;
+          });
+        },
+        child: _isLight
+            ? const Icon(
+                Icons.dark_mode,
+              )
+            : const Icon(
+                Icons.light_mode,
+              ),
+      ),
+    );
+  }
+
   Widget _buildEditor() {
-    return SuperEditor(
-      editor: _docEditor,
-      composer: _composer,
-      focusNode: _editorFocusNode,
-      scrollController: _scrollController,
-      documentLayoutKey: _docLayoutKey,
-      stylesheet: defaultStylesheet.copyWith(
-        addRulesAfter: [taskStyles],
-      ),
-      componentBuilders: [
-        ...defaultComponentBuilders,
-        TaskComponentBuilder(_docEditor),
-      ],
-      gestureMode: _gestureMode,
-      inputSource: _inputSource,
-      androidToolbarBuilder: (_) => AndroidTextEditingFloatingToolbar(
-        onCutPressed: _cut,
-        onCopyPressed: _copy,
-        onPastePressed: _paste,
-        onSelectAllPressed: _selectAll,
-      ),
-      iOSToolbarBuilder: (_) => IOSTextEditingFloatingToolbar(
-        onCutPressed: _cut,
-        onCopyPressed: _copy,
-        onPastePressed: _paste,
+    return ColoredBox(
+      color: _isLight ? _lightBackground : _darkBackground,
+      child: SuperEditor(
+        editor: _docEditor,
+        composer: _composer,
+        focusNode: _editorFocusNode,
+        scrollController: _scrollController,
+        documentLayoutKey: _docLayoutKey,
+        documentOverlayBuilders: [
+          DefaultCaretOverlayBuilder(
+            CaretStyle().copyWith(color: _isLight ? Colors.black : Colors.redAccent),
+          ),
+        ],
+        selectionStyle: _isLight
+            ? defaultSelectionStyle
+            : SelectionStyles(
+                selectionColor: Colors.red.withOpacity(0.3),
+              ),
+        stylesheet: defaultStylesheet.copyWith(
+          addRulesAfter: [
+            if (!_isLight) ..._darkModeStyles,
+            taskStyles,
+          ],
+        ),
+        componentBuilders: [
+          ...defaultComponentBuilders,
+          TaskComponentBuilder(_docEditor),
+        ],
+        gestureMode: _gestureMode,
+        inputSource: _inputSource,
+        keyboardActions: _inputSource == DocumentInputSource.ime ? defaultImeKeyboardActions : defaultKeyboardActions,
+        androidToolbarBuilder: (_) => AndroidTextEditingFloatingToolbar(
+          onCutPressed: _cut,
+          onCopyPressed: _copy,
+          onPastePressed: _paste,
+          onSelectAllPressed: _selectAll,
+        ),
+        iOSToolbarBuilder: (_) => IOSTextEditingFloatingToolbar(
+          onCutPressed: _cut,
+          onCopyPressed: _copy,
+          onPastePressed: _paste,
+        ),
       ),
     );
   }
@@ -343,3 +397,37 @@ class _ExampleEditorState extends State<ExampleEditor> {
     );
   }
 }
+
+// Makes text light, for use during dark mode styling.
+final _darkModeStyles = [
+  StyleRule(
+    BlockSelector.all,
+    (doc, docNode) {
+      return {
+        "textStyle": const TextStyle(
+          color: Color(0xFFCCCCCC),
+        ),
+      };
+    },
+  ),
+  StyleRule(
+    const BlockSelector("header1"),
+    (doc, docNode) {
+      return {
+        "textStyle": const TextStyle(
+          color: Color(0xFF888888),
+        ),
+      };
+    },
+  ),
+  StyleRule(
+    const BlockSelector("header2"),
+    (doc, docNode) {
+      return {
+        "textStyle": const TextStyle(
+          color: Color(0xFF888888),
+        ),
+      };
+    },
+  ),
+];

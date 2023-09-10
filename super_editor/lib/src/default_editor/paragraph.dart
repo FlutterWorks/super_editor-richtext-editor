@@ -2,14 +2,19 @@ import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document.dart';
-import 'package:super_editor/src/core/document_editor.dart';
+import 'package:super_editor/src/core/document_composer.dart';
+import 'package:super_editor/src/core/document_layout.dart';
 import 'package:super_editor/src/core/document_selection.dart';
 import 'package:super_editor/src/core/edit_context.dart';
+import 'package:super_editor/src/core/editor.dart';
+import 'package:super_editor/src/default_editor/attributions.dart';
+import 'package:super_editor/src/default_editor/multi_node_editing.dart';
 import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
 import 'package:super_editor/src/infrastructure/keyboard.dart';
 import 'package:super_editor/src/infrastructure/raw_key_event_extensions.dart';
+import 'package:super_editor/src/infrastructure/text_input.dart';
 
 import 'layout_single_column/layout_single_column.dart';
 import 'text_tools.dart';
@@ -25,7 +30,7 @@ class ParagraphNode extends TextNode {
           metadata: metadata,
         ) {
     if (getMetadataValue("blockType") == null) {
-      putMetadataValue("blockType", const NamedAttribution("paragraph"));
+      putMetadataValue("blockType", paragraphAttribution);
     }
   }
 }
@@ -120,6 +125,8 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
   }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
 
   Attribution? blockType;
+
+  @override
   AttributedText text;
   @override
   AttributionStyleBuilder textStyleBuilder;
@@ -179,6 +186,63 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       highlightWhenEmpty.hashCode;
 }
 
+class ChangeParagraphBlockTypeRequest implements EditRequest {
+  ChangeParagraphBlockTypeRequest({
+    required this.nodeId,
+    required this.blockType,
+  });
+
+  final String nodeId;
+  final Attribution? blockType;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChangeParagraphBlockTypeRequest &&
+          runtimeType == other.runtimeType &&
+          nodeId == other.nodeId &&
+          blockType == other.blockType;
+
+  @override
+  int get hashCode => nodeId.hashCode ^ blockType.hashCode;
+}
+
+class ChangeParagraphBlockTypeCommand implements EditCommand {
+  const ChangeParagraphBlockTypeCommand({
+    required this.nodeId,
+    required this.blockType,
+  });
+
+  final String nodeId;
+  final Attribution? blockType;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    final document = context.find<MutableDocument>(Editor.documentKey);
+
+    final existingNode = document.getNodeById(nodeId)! as ParagraphNode;
+    existingNode.putMetadataValue('blockType', blockType);
+
+    executor.logChanges([
+      DocumentEdit(
+        NodeChangeEvent(nodeId),
+      ),
+    ]);
+  }
+}
+
+/// [EditRequest] to combine the [ParagraphNode] with [firstNodeId] with the [ParagraphNode] after it, which
+/// should have the [secondNodeId].
+class CombineParagraphsRequest implements EditRequest {
+  CombineParagraphsRequest({
+    required this.firstNodeId,
+    required this.secondNodeId,
+  }) : assert(firstNodeId != secondNodeId);
+
+  final String firstNodeId;
+  final String secondNodeId;
+}
+
 /// Combines two consecutive `ParagraphNode`s, indicated by `firstNodeId`
 /// and `secondNodeId`, respectively.
 ///
@@ -186,7 +250,7 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
 /// in reverse order, the command fizzles.
 ///
 /// If both nodes are not `ParagraphNode`s, the command fizzles.
-class CombineParagraphsCommand implements EditorCommand {
+class CombineParagraphsCommand implements EditCommand {
   CombineParagraphsCommand({
     required this.firstNodeId,
     required this.secondNodeId,
@@ -196,9 +260,10 @@ class CombineParagraphsCommand implements EditorCommand {
   final String secondNodeId;
 
   @override
-  void execute(Document document, DocumentEditorTransaction transaction) {
+  void execute(EditContext context, CommandExecutor executor) {
     editorDocLog.info('Executing CombineParagraphsCommand');
     editorDocLog.info(' - merging "$firstNodeId" <- "$secondNodeId"');
+    final document = context.find<MutableDocument>(Editor.documentKey);
     final secondNode = document.getNodeById(secondNodeId);
     if (secondNode is! TextNode) {
       editorDocLog.info('WARNING: Cannot merge node of type: $secondNode into node above.');
@@ -222,39 +287,93 @@ class CombineParagraphsCommand implements EditorCommand {
     // Combine the text and delete the currently selected node.
     final isTopNodeEmpty = nodeAbove.text.text.isEmpty;
     nodeAbove.text = nodeAbove.text.copyAndAppend(secondNode.text);
-    if (isTopNodeEmpty) {
+
+    // Avoid overriding the metadata when the nodeAbove isn't a ParagraphNode.
+    //
+    // If we are combining different kinds of nodes, e.g., a list item and a paragraph,
+    // overriding the metadata will cause the nodeAbove to end up with an incorrect blockType.
+    // This will cause incorrect styles to be applied.
+    if (isTopNodeEmpty && nodeAbove is ParagraphNode) {
       // If the top node was empty, we want to retain everything in the
       // bottom node, including the block attribution and styles.
       nodeAbove.metadata = secondNode.metadata;
     }
-    bool didRemove = transaction.deleteNode(secondNode);
+    bool didRemove = document.deleteNode(secondNode);
     if (!didRemove) {
       editorDocLog.info('ERROR: Failed to delete the currently selected node from the document.');
     }
+
+    executor.logChanges([
+      DocumentEdit(
+        NodeRemovedEvent(secondNode.id, secondNode),
+      ),
+      DocumentEdit(
+        NodeChangeEvent(nodeAbove.id),
+      ),
+    ]);
   }
 }
 
-/// Splits the `ParagraphNode` affiliated with the given `nodeId` at the
-/// given `splitPosition`, placing all text after `splitPosition` in a
-/// new `ParagraphNode` with the given `newNodeId`, inserted after the
-/// original node.
-class SplitParagraphCommand implements EditorCommand {
-  SplitParagraphCommand({
+class SplitParagraphRequest implements EditRequest {
+  SplitParagraphRequest({
     required this.nodeId,
     required this.splitPosition,
     required this.newNodeId,
     required this.replicateExistingMetadata,
+    this.attributionsToExtendToNewParagraph = defaultAttributionsToExtendToNewParagraph,
   });
 
   final String nodeId;
   final TextPosition splitPosition;
   final String newNodeId;
   final bool replicateExistingMetadata;
+  // TODO: remove the attribution filter and move the decision to an EditReaction in #1296
+  final AttributionFilter attributionsToExtendToNewParagraph;
+}
+
+/// The default [Attribution]s, which will be carried over from the end of a paragraph
+/// to the beginning of a new paragraph, when splitting a paragraph at the very end.
+///
+/// In practice, this means that when a user places the caret at the end of paragraph
+/// and presses ENTER, these [Attribution]s will be applied to the beginning of the
+/// new paragraph.
+// TODO: remove the attribution filter and move the decision to an EditReaction in #1296
+bool defaultAttributionsToExtendToNewParagraph(Attribution attribution) {
+  return _defaultAttributionsToExtend.contains(attribution);
+}
+
+final _defaultAttributionsToExtend = {
+  boldAttribution,
+  italicsAttribution,
+  underlineAttribution,
+  strikethroughAttribution,
+};
+
+/// Splits the `ParagraphNode` affiliated with the given `nodeId` at the
+/// given `splitPosition`, placing all text after `splitPosition` in a
+/// new `ParagraphNode` with the given `newNodeId`, inserted after the
+/// original node.
+class SplitParagraphCommand implements EditCommand {
+  SplitParagraphCommand({
+    required this.nodeId,
+    required this.splitPosition,
+    required this.newNodeId,
+    required this.replicateExistingMetadata,
+    this.attributionsToExtendToNewParagraph = defaultAttributionsToExtendToNewParagraph,
+  });
+
+  final String nodeId;
+  final TextPosition splitPosition;
+  final String newNodeId;
+  final bool replicateExistingMetadata;
+  // TODO: remove the attribution filter and move the decision to an EditReaction in #1296
+  final AttributionFilter attributionsToExtendToNewParagraph;
 
   @override
-  void execute(Document document, DocumentEditorTransaction transaction) {
+  void execute(EditContext context, CommandExecutor executor) {
     editorDocLog.info('Executing SplitParagraphCommand');
 
+    final document = context.find<MutableDocument>(Editor.documentKey);
     final node = document.getNodeById(nodeId);
     if (node is! ParagraphNode) {
       editorDocLog.info('WARNING: Cannot split paragraph for node of type: $node.');
@@ -267,6 +386,29 @@ class SplitParagraphCommand implements EditorCommand {
     editorDocLog.info('Splitting paragraph:');
     editorDocLog.info(' - start text: "${startText.text}"');
     editorDocLog.info(' - end text: "${endText.text}"');
+
+    if (splitPosition.offset == text.text.length) {
+      // The paragraph was split at the very end, the user is creating a new,
+      // empty paragraph. We should only extend desired attributions from the end
+      // of one paragraph, to the beginning of a new paragraph.
+      final newParagraphAttributions = endText.getAttributionSpansInRange(
+        attributionFilter: (a) => true,
+        range: const SpanRange(0, 0),
+      );
+      for (final attributionRange in newParagraphAttributions) {
+        if (attributionsToExtendToNewParagraph(attributionRange.attribution)) {
+          // This is an attribution that should continue into a new paragraph.
+          // Letting it stay.
+          continue;
+        }
+
+        // This attribution shouldn't extend from one paragraph to another. Remove it.
+        endText.removeAttribution(
+          attributionRange.attribution,
+          SpanRange(attributionRange.start, attributionRange.end),
+        );
+      }
+    }
 
     // Change the current nodes content to just the text before the caret.
     editorDocLog.info(' - changing the original paragraph text due to split');
@@ -283,17 +425,228 @@ class SplitParagraphCommand implements EditorCommand {
 
     // Insert the new node after the current node.
     editorDocLog.info(' - inserting new node in document');
-    transaction.insertNodeAfter(
+    document.insertNodeAfter(
       existingNode: node,
       newNode: newNode,
     );
 
     editorDocLog.info(' - inserted new node: ${newNode.id} after old one: ${node.id}');
+
+    // Move the caret to the new node.
+    final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
+    final oldSelection = composer.selection;
+    final oldComposingRegion = composer.composingRegion.value;
+    final newSelection = DocumentSelection.collapsed(
+      position: DocumentPosition(
+        nodeId: newNodeId,
+        nodePosition: const TextNodePosition(offset: 0),
+      ),
+    );
+
+    composer.setSelectionWithReason(newSelection, SelectionReason.userInteraction);
+    composer.setComposingRegion(null);
+
+    final documentChanges = [
+      DocumentEdit(
+        NodeChangeEvent(node.id),
+      ),
+      DocumentEdit(
+        NodeInsertedEvent(newNodeId, document.getNodeIndexById(newNodeId)),
+      ),
+      SelectionChangeEvent(
+        oldSelection: oldSelection,
+        newSelection: newSelection,
+        oldComposingRegion: oldComposingRegion,
+        newComposingRegion: null,
+        changeType: SelectionChangeType.insertContent,
+        reason: SelectionReason.userInteraction,
+      ),
+    ];
+
+    if (newNode.text.text.isEmpty) {
+      executor.logChanges([
+        SubmitParagraphIntention.start(),
+        ...documentChanges,
+        SubmitParagraphIntention.end(),
+      ]);
+    } else {
+      executor.logChanges([
+        SplitParagraphIntention.start(),
+        ...documentChanges,
+        SplitParagraphIntention.end(),
+      ]);
+    }
   }
 }
 
+class DeleteUpstreamAtBeginningOfParagraphCommand implements EditCommand {
+  DeleteUpstreamAtBeginningOfParagraphCommand(this.node);
+
+  final DocumentNode node;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    if (node is! ParagraphNode) {
+      return;
+    }
+
+    final deletionPosition = DocumentPosition(nodeId: node.id, nodePosition: node.beginningPosition);
+    if (deletionPosition.nodePosition is! TextNodePosition) {
+      return;
+    }
+
+    final document = context.find<MutableDocument>(Editor.documentKey);
+    final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
+    final documentLayoutEditable = context.find<DocumentLayoutEditable>(Editor.layoutKey);
+
+    final paragraphNode = node as ParagraphNode;
+    if (paragraphNode.metadata["blockType"] != paragraphAttribution) {
+      executor.executeCommand(
+        ChangeParagraphBlockTypeCommand(
+          nodeId: node.id,
+          blockType: paragraphAttribution,
+        ),
+      );
+      return;
+    }
+
+    final nodeBefore = document.getNodeBefore(node);
+    if (nodeBefore == null) {
+      return;
+    }
+
+    if (nodeBefore is TextNode) {
+      // The caret is at the beginning of one TextNode and is preceded by
+      // another TextNode. Merge the two TextNodes.
+      mergeTextNodeWithUpstreamTextNode(executor, document, composer);
+      return;
+    }
+
+    final componentBefore = documentLayoutEditable.documentLayout.getComponentByNodeId(nodeBefore.id)!;
+    if (!componentBefore.isVisualSelectionSupported()) {
+      // The node/component above is not selectable. Delete it.
+      executor.executeCommand(
+        DeleteNodeCommand(nodeId: nodeBefore.id),
+      );
+      return;
+    }
+
+    moveSelectionToEndOfPrecedingNode(executor, document, composer);
+
+    if ((node as TextNode).text.text.isEmpty) {
+      // The caret is at the beginning of an empty TextNode and the preceding
+      // node is not a TextNode. Delete the current TextNode and move the
+      // selection up to the preceding node if exist.
+      executor.executeCommand(
+        DeleteNodeCommand(nodeId: node.id),
+      );
+    }
+  }
+
+  bool mergeTextNodeWithUpstreamTextNode(
+    CommandExecutor executor,
+    MutableDocument document,
+    MutableDocumentComposer composer,
+  ) {
+    final node = document.getNodeById(composer.selection!.extent.nodeId);
+    if (node == null) {
+      return false;
+    }
+
+    final nodeAbove = document.getNodeBefore(node);
+    if (nodeAbove == null) {
+      return false;
+    }
+    if (nodeAbove is! TextNode) {
+      return false;
+    }
+
+    final aboveParagraphLength = nodeAbove.text.text.length;
+
+    // Send edit command.
+    executor
+      ..executeCommand(
+        CombineParagraphsCommand(
+          firstNodeId: nodeAbove.id,
+          secondNodeId: node.id,
+        ),
+      )
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: nodeAbove.id,
+              nodePosition: TextNodePosition(offset: aboveParagraphLength),
+            ),
+          ),
+          SelectionChangeType.deleteContent,
+          SelectionReason.userInteraction,
+        ),
+      );
+
+    return true;
+  }
+
+  void moveSelectionToEndOfPrecedingNode(
+    CommandExecutor executor,
+    MutableDocument document,
+    MutableDocumentComposer composer,
+  ) {
+    if (composer.selection == null) {
+      return;
+    }
+
+    final node = document.getNodeById(composer.selection!.extent.nodeId);
+    if (node == null) {
+      return;
+    }
+
+    final nodeBefore = document.getNodeBefore(node);
+    if (nodeBefore == null) {
+      return;
+    }
+
+    executor.executeCommand(
+      ChangeSelectionCommand(
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: nodeBefore.id,
+            nodePosition: nodeBefore.endPosition,
+          ),
+        ),
+        SelectionChangeType.collapseSelection,
+        SelectionReason.userInteraction,
+      ),
+    );
+  }
+}
+
+class Intention implements EditEvent {
+  Intention.start() : _isStart = true;
+
+  Intention.end() : _isStart = false;
+
+  final bool _isStart;
+
+  bool get isStart => _isStart;
+
+  bool get isEnd => !_isStart;
+}
+
+class SplitParagraphIntention extends Intention {
+  SplitParagraphIntention.start() : super.start();
+
+  SplitParagraphIntention.end() : super.end();
+}
+
+class SubmitParagraphIntention extends Intention {
+  SubmitParagraphIntention.start() : super.start();
+
+  SubmitParagraphIntention.end() : super.end();
+}
+
 ExecutionInstruction anyCharacterToInsertInParagraph({
-  required EditContext editContext,
+  required SuperEditorContext editContext,
   required RawKeyEvent keyEvent,
 }) {
   if (editContext.composer.selection == null) {
@@ -329,36 +682,37 @@ ExecutionInstruction anyCharacterToInsertInParagraph({
 
   final didInsertCharacter = editContext.commonOps.insertCharacter(character);
 
-  if (didInsertCharacter && character == ' ') {
-    editContext.commonOps.convertParagraphByPatternMatching(
-      editContext.composer.selection!.extent.nodeId,
-    );
-  }
-
   return didInsertCharacter ? ExecutionInstruction.haltExecution : ExecutionInstruction.continueExecution;
 }
 
-class DeleteParagraphsCommand implements EditorCommand {
-  DeleteParagraphsCommand({
+class DeleteParagraphCommand implements EditCommand {
+  DeleteParagraphCommand({
     required this.nodeId,
   });
 
   final String nodeId;
 
   @override
-  void execute(Document document, DocumentEditorTransaction transaction) {
-    editorDocLog.info('Executing DeleteParagraphsCommand');
+  void execute(EditContext context, CommandExecutor executor) {
+    editorDocLog.info('Executing DeleteParagraphCommand');
     editorDocLog.info(' - deleting "$nodeId"');
+    final document = context.find<MutableDocument>(Editor.documentKey);
     final node = document.getNodeById(nodeId);
     if (node is! TextNode) {
       editorDocLog.shout('WARNING: Cannot delete node of type: $node.');
       return;
     }
 
-    bool didRemove = transaction.deleteNode(node);
+    bool didRemove = document.deleteNode(node);
     if (!didRemove) {
       editorDocLog.shout('ERROR: Failed to delete node "$node" from the document.');
     }
+
+    executor.logChanges([
+      DocumentEdit(
+        NodeRemovedEvent(node.id, node),
+      )
+    ]);
   }
 }
 
@@ -366,9 +720,13 @@ class DeleteParagraphsCommand implements EditorCommand {
 /// and backspace is pressed, clear any existing block type, e.g.,
 /// header 1, header 2, blockquote.
 ExecutionInstruction backspaceToClearParagraphBlockType({
-  required EditContext editContext,
+  required SuperEditorContext editContext,
   required RawKeyEvent keyEvent,
 }) {
+  if (keyEvent is! RawKeyDownEvent) {
+    return ExecutionInstruction.continueExecution;
+  }
+
   if (keyEvent.logicalKey != LogicalKeyboardKey.backspace) {
     return ExecutionInstruction.continueExecution;
   }
@@ -381,7 +739,7 @@ ExecutionInstruction backspaceToClearParagraphBlockType({
     return ExecutionInstruction.continueExecution;
   }
 
-  final node = editContext.editor.document.getNodeById(editContext.composer.selection!.extent.nodeId);
+  final node = editContext.document.getNodeById(editContext.composer.selection!.extent.nodeId);
   if (node is! ParagraphNode) {
     return ExecutionInstruction.continueExecution;
   }
@@ -396,9 +754,13 @@ ExecutionInstruction backspaceToClearParagraphBlockType({
 }
 
 ExecutionInstruction enterToInsertBlockNewline({
-  required EditContext editContext,
+  required SuperEditorContext editContext,
   required RawKeyEvent keyEvent,
 }) {
+  if (keyEvent is! RawKeyDownEvent) {
+    return ExecutionInstruction.continueExecution;
+  }
+
   if (keyEvent.logicalKey != LogicalKeyboardKey.enter && keyEvent.logicalKey != LogicalKeyboardKey.numpadEnter) {
     return ExecutionInstruction.continueExecution;
   }
@@ -409,7 +771,7 @@ ExecutionInstruction enterToInsertBlockNewline({
 }
 
 ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
-  required EditContext editContext,
+  required SuperEditorContext editContext,
   required RawKeyEvent keyEvent,
 }) {
   if (keyEvent.logicalKey != LogicalKeyboardKey.backspace) {
@@ -422,7 +784,7 @@ ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
     return ExecutionInstruction.continueExecution;
   }
 
-  final node = editContext.editor.document.getNodeById(editContext.composer.selection!.extent.nodeId);
+  final node = editContext.document.getNodeById(editContext.composer.selection!.extent.nodeId);
   if (node is! ParagraphNode) {
     return ExecutionInstruction.continueExecution;
   }
@@ -431,7 +793,7 @@ ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
     return ExecutionInstruction.continueExecution;
   }
 
-  final nodeAbove = editContext.editor.document.getNodeBefore(node);
+  final nodeAbove = editContext.document.getNodeBefore(node);
   if (nodeAbove == null) {
     return ExecutionInstruction.continueExecution;
   }
@@ -440,9 +802,81 @@ ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
     nodePosition: nodeAbove.endPosition,
   );
 
-  editContext.composer.selection = DocumentSelection.collapsed(
-    position: newDocumentPosition,
-  );
+  editContext.editor.execute([
+    ChangeSelectionRequest(
+      DocumentSelection.collapsed(
+        position: newDocumentPosition,
+      ),
+      SelectionChangeType.deleteContent,
+      SelectionReason.userInteraction,
+    ),
+  ]);
 
   return ExecutionInstruction.haltExecution;
+}
+
+ExecutionInstruction doNothingWithEnterOnWeb({
+  required SuperEditorContext editContext,
+  required RawKeyEvent keyEvent,
+}) {
+  if (keyEvent is! RawKeyDownEvent) {
+    return ExecutionInstruction.continueExecution;
+  }
+
+  if (keyEvent.logicalKey != LogicalKeyboardKey.enter && keyEvent.logicalKey != LogicalKeyboardKey.numpadEnter) {
+    return ExecutionInstruction.continueExecution;
+  }
+
+  if (isWeb) {
+    // On web, pressing enter generates both a key event and a `TextInputAction.newline` action.
+    // We handle the newline action and ignore the key event.
+    // We return blocked so the OS can process it.
+    return ExecutionInstruction.blocked;
+  }
+
+  return ExecutionInstruction.continueExecution;
+}
+
+ExecutionInstruction doNothingWithBackspaceOnWeb({
+  required SuperEditorContext editContext,
+  required RawKeyEvent keyEvent,
+}) {
+  if (keyEvent is! RawKeyDownEvent) {
+    return ExecutionInstruction.continueExecution;
+  }
+
+  if (keyEvent.logicalKey != LogicalKeyboardKey.backspace) {
+    return ExecutionInstruction.continueExecution;
+  }
+
+  if (isWeb) {
+    // On web, pressing backspace generates both a key event and a deletion delta.
+    // We handle the deletion delta and ignore the key event.
+    // We return blocked so the OS can process it.
+    return ExecutionInstruction.blocked;
+  }
+
+  return ExecutionInstruction.continueExecution;
+}
+
+ExecutionInstruction doNothingWithDeleteOnWeb({
+  required SuperEditorContext editContext,
+  required RawKeyEvent keyEvent,
+}) {
+  if (keyEvent is! RawKeyDownEvent) {
+    return ExecutionInstruction.continueExecution;
+  }
+
+  if (keyEvent.logicalKey != LogicalKeyboardKey.delete) {
+    return ExecutionInstruction.continueExecution;
+  }
+
+  if (isWeb) {
+    // On web, pressing delete generates both a key event and a deletion delta.
+    // We handle the deletion delta and ignore the key event.
+    // We return blocked so the OS can process it.
+    return ExecutionInstruction.blocked;
+  }
+
+  return ExecutionInstruction.continueExecution;
 }

@@ -1,19 +1,46 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_robots/flutter_test_robots.dart';
+import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/src/infrastructure/blinking_caret.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
-import '../test_tools.dart';
-import 'document_test_tools.dart';
+import '../super_textfield/super_textfield_robot.dart';
+import 'supereditor_test_tools.dart';
 
 void main() {
   group("SuperEditor selection", () {
+    group("styles", () {
+      testWidgetsOnAllPlatforms("changes color of selected text", (tester) async {
+        final stylesheet = defaultStylesheet.copyWith(
+          selectedTextColorStrategy: ({required Color originalTextColor, required Color selectionHighlightColor}) {
+            return Colors.white;
+          },
+        );
+
+        await tester //
+            .createDocument()
+            .withSingleParagraph()
+            .useStylesheet(stylesheet)
+            .pump();
+
+        // Select the 2nd word in the paragraph.
+        await tester.doubleTapInParagraph("1", 7);
+
+        // Ensure that the first word is black and the second (selected) word is white.
+        final richText = SuperEditorInspector.findRichTextInParagraph("1");
+
+        expect(richText.getSpanForPosition(const TextPosition(offset: 0))!.style!.color, Colors.black);
+        expect(richText.getSpanForPosition(const TextPosition(offset: 5))!.style!.color, Colors.black);
+
+        expect(richText.getSpanForPosition(const TextPosition(offset: 6))!.style!.color, Colors.white);
+        expect(richText.getSpanForPosition(const TextPosition(offset: 10))!.style!.color, Colors.white);
+      });
+    });
+
     testWidgetsOnArbitraryDesktop("calculates upstream document selection within a single node", (tester) async {
       await tester //
           .createDocument() //
@@ -71,7 +98,7 @@ void main() {
           .createDocument() //
           .fromMarkdown("This is paragraph one.\nThis is paragraph two.") //
           .pump();
-      final nodeId = testContext.editContext.editor.document.nodes.first.id;
+      final nodeId = testContext.findEditContext().document.nodes.first.id;
 
       /// Triple tap on the first line in the paragraph node.
       await tester.tripleTapInParagraph(nodeId, 10);
@@ -102,7 +129,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.editContext.editor.document.nodes.first.id;
+      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -129,7 +156,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final secondParagraphId = testContext.editContext.editor.document.nodes.last.id;
+      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -161,7 +188,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final secondParagraphId = testContext.editContext.editor.document.nodes.last.id;
+      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -193,7 +220,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.editContext.editor.document.nodes.first.id;
+      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -220,8 +247,8 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.editContext.editor.document.nodes.first.id;
-      final secondParagraphId = testContext.editContext.editor.document.nodes.last.id;
+      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
+      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -251,8 +278,8 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.editContext.editor.document.nodes.first.id;
-      final secondParagraphId = testContext.editContext.editor.document.nodes.last.id;
+      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
+      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -358,7 +385,7 @@ void main() {
       await tester
           .createDocument()
           .withLongTextContent()
-          .withInputSource(DocumentInputSource.ime)
+          .withInputSource(TextInputSource.ime)
           .withAddedComponents([const _UnselectableHrComponentBuilder()])
           .withCustomWidgetTreeBuilder(
             (superEditor) => MaterialApp(
@@ -508,11 +535,207 @@ Second Paragraph
       expect(_caretFinder(), findsOneWidget);
     });
 
+    testWidgetsOnDesktop("by default keeps IME connection open when it loses primary focus", (tester) async {
+      // Note: we don't include mobile in this test because mobile text fields always use IME
+      // which will steal the IME connection away from SuperEditor and interfere with the expected
+      // result.
+
+      final textFieldFocus = FocusNode();
+      final editorFocus = FocusNode();
+      await tester
+          .createDocument()
+          .withSingleParagraph()
+          .withInputSource(TextInputSource.ime)
+          .withFocusNode(editorFocus)
+          .withCustomWidgetTreeBuilder(
+            (superEditor) => MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    FocusWithCustomParent(
+                      focusNode: textFieldFocus,
+                      parentFocusNode: editorFocus,
+                      child: SuperTextField(
+                        focusNode: textFieldFocus,
+                        // We put the SuperTextField in keyboard mode so that the SuperTextField
+                        // doesn't steal the IME connection. This way, we ensure that SuperEditor,
+                        // left to its own devices, will proactively close the IME connection when
+                        // it loses primary focus.
+                        inputSource: TextInputSource.keyboard,
+                      ),
+                    ),
+                    Expanded(
+                      child: superEditor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+          .autoFocus(true)
+          .pump();
+
+      // Ensure that SuperEditor begins with focus, a selection, and IME connection
+      expect(editorFocus.hasPrimaryFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), isNotNull);
+      expect(SuperEditorInspector.isImeConnectionOpen(), isTrue);
+
+      // Focus the textfield.
+      await tester.placeCaretInSuperTextField(0);
+
+      // Ensure that the textfield has primary focus, the editor doesn't, and the editor
+      // still has an open IME connection.
+      expect(textFieldFocus.hasPrimaryFocus, isTrue);
+      expect(editorFocus.hasPrimaryFocus, isFalse);
+      expect(editorFocus.hasFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), isNotNull);
+      expect(SuperEditorInspector.isImeConnectionOpen(), isTrue);
+
+      // Give focus back to the editor.
+      textFieldFocus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+      await tester.pump();
+
+      // Ensure that the textfield doesn't have any focus, and the editor has primary focus again.
+      expect(textFieldFocus.hasFocus, isFalse);
+      expect(editorFocus.hasPrimaryFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), isNotNull);
+      expect(SuperEditorInspector.isImeConnectionOpen(), isTrue);
+    });
+
+    testWidgetsOnDesktop("can optionally close IME connection when it loses primary focus", (tester) async {
+      // Note: we don't include mobile in this test because mobile text fields always use IME
+      // which will steal the IME connection away from SuperEditor and interfere with the expected
+      // result.
+
+      final textFieldFocus = FocusNode();
+      final editorFocus = FocusNode();
+      await tester
+          .createDocument()
+          .withSingleParagraph()
+          .withInputSource(TextInputSource.ime)
+          .withFocusNode(editorFocus)
+          .withImePolicies(
+            const SuperEditorImePolicies(closeKeyboardOnLosePrimaryFocus: true),
+          )
+          .withCustomWidgetTreeBuilder(
+            (superEditor) => MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    FocusWithCustomParent(
+                      focusNode: textFieldFocus,
+                      parentFocusNode: editorFocus,
+                      child: SuperTextField(
+                        focusNode: textFieldFocus,
+                        // We put the SuperTextField in keyboard mode so that the SuperTextField
+                        // doesn't steal the IME connection. This way, we ensure that SuperEditor,
+                        // left to its own devices, will proactively close the IME connection when
+                        // it loses primary focus.
+                        inputSource: TextInputSource.keyboard,
+                      ),
+                    ),
+                    Expanded(
+                      child: superEditor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+          .autoFocus(true)
+          .pump();
+
+      // Ensure that SuperEditor begins with focus, a selection, and IME connection
+      expect(editorFocus.hasPrimaryFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), isNotNull);
+      expect(SuperEditorInspector.isImeConnectionOpen(), isTrue);
+
+      // Focus the textfield.
+      await tester.placeCaretInSuperTextField(0);
+
+      // Ensure that the textfield has primary focus, the editor doesn't, and the editor
+      // closed the IME connection.
+      expect(textFieldFocus.hasPrimaryFocus, isTrue);
+      expect(editorFocus.hasPrimaryFocus, isFalse);
+      expect(editorFocus.hasFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), isNotNull);
+      expect(SuperEditorInspector.isImeConnectionOpen(), isFalse);
+
+      // Give focus back to the editor.
+      textFieldFocus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+      await tester.pump();
+
+      // Ensure that the textfield doesn't have any focus, and the editor has primary focus again.
+      expect(textFieldFocus.hasFocus, isFalse);
+      expect(editorFocus.hasPrimaryFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), isNotNull);
+      expect(SuperEditorInspector.isImeConnectionOpen(), isTrue);
+    });
+
+    testWidgetsOnAllPlatforms("retains selection when user types in sub-focus text field", (tester) async {
+      final textFieldFocus = FocusNode();
+      final textFieldController = ImeAttributedTextEditingController();
+      final editorFocus = FocusNode();
+      const initialEditorSelection = DocumentSelection(
+        base: DocumentPosition(nodeId: "1", nodePosition: TextNodePosition(offset: 6)),
+        extent: DocumentPosition(nodeId: "1", nodePosition: TextNodePosition(offset: 11)),
+      );
+      await tester
+          .createDocument()
+          .withSingleParagraph()
+          .withInputSource(TextInputSource.ime)
+          .withFocusNode(editorFocus)
+          .withSelection(initialEditorSelection)
+          .withSelectionPolicies(const SuperEditorSelectionPolicies(
+            clearSelectionWhenEditorLosesFocus: true,
+          ))
+          .withCustomWidgetTreeBuilder(
+            (superEditor) => MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    FocusWithCustomParent(
+                      focusNode: textFieldFocus,
+                      parentFocusNode: editorFocus,
+                      child: SuperTextField(
+                        focusNode: textFieldFocus,
+                        textController: textFieldController,
+                        inputSource: TextInputSource.ime,
+                      ),
+                    ),
+                    Expanded(
+                      child: superEditor,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+          .autoFocus(true)
+          .pump();
+
+      // Ensure that SuperEditor has focus, a selection, and IME connection
+      expect(editorFocus.hasPrimaryFocus, isTrue);
+      expect(SuperEditorInspector.findDocumentSelection(), initialEditorSelection);
+
+      // Type into the text field.
+      await tester.placeCaretInSuperTextField(0);
+      await tester.typeImeText("Hello, world", find.byType(SuperTextField));
+
+      // Ensure the text field received the text.
+      expect(textFieldController.text.text, "Hello, world");
+
+      // Ensure that SuperEditor has the same selection as before.
+      expect(SuperEditorInspector.findDocumentSelection(), initialEditorSelection);
+    });
+
+    // TODO: make sure caret disappears when editor has focus, but not primary focus
+
     testWidgetsOnAllPlatforms("places caret at the previous selection when re-focusing by tab", (tester) async {
       await tester
           .createDocument()
           .withSingleParagraph()
-          .withInputSource(DocumentInputSource.ime)
+          .withInputSource(TextInputSource.ime)
           .withCustomWidgetTreeBuilder(
             (superEditor) => MaterialApp(
               home: Scaffold(
@@ -569,7 +792,7 @@ Second Paragraph
       await tester
           .createDocument()
           .withSingleParagraph()
-          .withInputSource(DocumentInputSource.ime)
+          .withInputSource(TextInputSource.ime)
           .withCustomWidgetTreeBuilder(
             (superEditor) => MaterialApp(
               home: Scaffold(
@@ -629,7 +852,7 @@ Second Paragraph
       await tester
           .createDocument()
           .withSingleParagraph()
-          .withInputSource(DocumentInputSource.ime)
+          .withInputSource(TextInputSource.ime)
           .withFocusNode(focusNode)
           .withCustomWidgetTreeBuilder(
             (superEditor) => MaterialApp(
@@ -683,6 +906,61 @@ Second Paragraph
       expect(_caretFinder(), findsOneWidget);
     });
 
+    testWidgetsOnAllPlatforms("doesn't restore previous selection upon re-focusing when selected node was deleted",
+        (tester) async {
+      final focusNode = FocusNode();
+
+      final context = await tester
+          .createDocument()
+          .withLongTextContent()
+          .withInputSource(TextInputSource.ime)
+          .withFocusNode(focusNode)
+          .withCustomWidgetTreeBuilder(
+            (superEditor) => MaterialApp(
+              home: Scaffold(
+                body: Column(
+                  children: [
+                    const TextField(),
+                    Expanded(child: superEditor),
+                  ],
+                ),
+              ),
+            ),
+          )
+          .pump();
+
+      // Place caret at the beginning of the text.
+      await tester.placeCaretInParagraph('1', 0);
+      expect(
+        SuperEditorInspector.findDocumentSelection(),
+        const DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: '1',
+            nodePosition: TextNodePosition(offset: 0),
+          ),
+        ),
+      );
+
+      // Focus the textfield.
+      await tester.tap(find.byType(TextField));
+      await tester.pumpAndSettle();
+
+      // Ensure selection was cleared.
+      expect(SuperEditorInspector.findDocumentSelection(), isNull);
+
+      // Delete the selected node.
+      context.findEditContext().editor.execute([
+        DeleteNodeRequest(nodeId: "1"),
+      ]);
+
+      // Focus the editor.
+      focusNode.requestFocus();
+      await tester.pumpAndSettle();
+
+      // Ensure no selection was restored.
+      expect(SuperEditorInspector.findDocumentSelection(), isNull);
+    });
+
     testWidgetsOnAllPlatforms('retains composer initial selection upon first editor focus', (tester) async {
       final focusNode = FocusNode();
 
@@ -715,7 +993,7 @@ Second Paragraph
       await tester //
           .createDocument()
           .withSingleParagraph()
-          .withInputSource(DocumentInputSource.ime)
+          .withInputSource(TextInputSource.ime)
           .pump();
 
       // Place the caret at the middle of the first word.
@@ -745,53 +1023,59 @@ Second Paragraph
       );
     });
 
-    test("emits a DocumentSelectionChange when changing selection by the notifier", () async {
-      final composer = DocumentComposer();
+    testWidgetsOnAllPlatforms("doesn't notify about selection changes when the selection hasn't changed",
+        (tester) async {
+      // The composer pauses and restarts selection notifications, which is an unusual
+      // behavior. We want to ensure that when the selection doesn't actually change,
+      // this system doesn't send selection change notifications.
 
-      const newSelection = DocumentSelection.collapsed(
-        position: DocumentPosition(
-          nodeId: "1",
-          nodePosition: TextNodePosition(offset: 0),
-        ),
-      );
+      final context = await tester //
+          .createDocument()
+          .withLongTextContent()
+          .autoFocus(true)
+          .pump();
 
-      // Ensure the stream emits the DocumentSelectionChange.
-      expectLater(
-        composer.selectionChanges,
-        emits(
-          DocumentSelectionChange(
-            selection: newSelection,
-            reason: SelectionReason.userInteraction,
+      final doc = context.findEditContext().document;
+      final composer = context.findEditContext().composer;
+
+      int selectionNotificationCount = 0;
+      composer.selectionNotifier.addListener(() {
+        selectionNotificationCount += 1;
+      });
+      int selectionChangeCount = 0;
+      composer.selectionChanges.listen((event) {
+        selectionChangeCount += 1;
+      });
+
+      // Ensure selection is at the last character of the last paragraph.
+      expect(
+        SuperEditorInspector.findDocumentSelection(),
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: doc.nodes.last.id,
+            nodePosition: const TextNodePosition(offset: 477),
           ),
         ),
       );
 
-      // Update the selection, which should cause the stream to emit a value.
-      composer.selection = newSelection;
-    }, timeout: const Timeout(Duration(milliseconds: 500)));
-
-    test("notifies selectionNotifier when a new DocumentSelection is emitted", () {
-      final composer = DocumentComposer();
-
-      // Holds the selection emitted by the selectionNotifier.
-      DocumentSelection? emittedSelection;
-
-      const newSelection = DocumentSelection.collapsed(
-        position: DocumentPosition(
-          nodeId: "1",
-          nodePosition: TextNodePosition(offset: 0),
+      // Send a selection change, using the existing selection.
+      context.findEditContext().editor.execute([
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: doc.nodes.last.id,
+              nodePosition: const TextNodePosition(offset: 477),
+            ),
+          ),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
         ),
-      );
+      ]);
+      await tester.pump();
 
-      composer.selectionNotifier.addListener(() {
-        emittedSelection = composer.selectionNotifier.value;
-      });
-
-      // Emit a DocumentSelectionChange.
-      composer.setSelectionWithReason(newSelection);
-
-      // Ensure the listener was called and the selection in the selectionNotifier is correct.
-      expect(emittedSelection, newSelection);
+      // Ensure that we weren't notified of any selection changes.
+      expect(selectionNotificationCount, 0);
+      expect(selectionChangeCount, 0);
     });
   });
 }

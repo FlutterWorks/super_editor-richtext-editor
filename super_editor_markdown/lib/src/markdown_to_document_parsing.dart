@@ -28,6 +28,7 @@ MutableDocument deserializeMarkdownToDocument(
       if (syntax == MarkdownSyntax.superEditor) //
         _ParagraphWithAlignmentSyntax(),
       _EmptyLinePreservingParagraphSyntax(),
+      _TaskSyntax(),
     ],
   );
   final blockParser = md.BlockParser(markdownLines, markdownDoc);
@@ -48,7 +49,7 @@ MutableDocument deserializeMarkdownToDocument(
     // For the user to be able to interact with the editor, at least one
     // node is required, so we add an empty paragraph.
     documentNodes.add(
-      ParagraphNode(id: DocumentEditor.createNodeId(), text: AttributedText(text: '')),
+      ParagraphNode(id: Editor.createNodeId(), text: AttributedText()),
     );
   }
 
@@ -149,6 +150,9 @@ class _MarkdownToDocument implements md.NodeVisitor {
       case 'hr':
         _addHorizontalRule();
         break;
+      case 'task':
+        _addTask(element);
+        break;
     }
 
     return true;
@@ -195,7 +199,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
 
     _content.add(
       ParagraphNode(
-        id: DocumentEditor.createNodeId(),
+        id: Editor.createNodeId(),
         text: _parseInlineText(element),
         metadata: {
           'blockType': headerAttribution,
@@ -209,7 +213,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
 
     _content.add(
       ParagraphNode(
-        id: DocumentEditor.createNodeId(),
+        id: Editor.createNodeId(),
         text: attributedText,
         metadata: {
           'textAlign': textAlign != null ? textAlign : null,
@@ -221,7 +225,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
   void _addBlockquote(md.Element element) {
     _content.add(
       ParagraphNode(
-        id: DocumentEditor.createNodeId(),
+        id: Editor.createNodeId(),
         text: _parseInlineText(element),
         metadata: {
           'blockType': blockquoteAttribution,
@@ -241,9 +245,9 @@ class _MarkdownToDocument implements md.NodeVisitor {
 
     _content.add(
       ParagraphNode(
-        id: DocumentEditor.createNodeId(),
+        id: Editor.createNodeId(),
         text: AttributedText(
-          text: element.textContent,
+          element.textContent,
         ),
         metadata: {
           'blockType': codeAttribution,
@@ -258,7 +262,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
   }) {
     _content.add(
       ImageNode(
-        id: DocumentEditor.createNodeId(),
+        id: Editor.createNodeId(),
         imageUrl: imageUrl,
         altText: altText,
       ),
@@ -267,7 +271,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
 
   void _addHorizontalRule() {
     _content.add(HorizontalRuleNode(
-      id: DocumentEditor.createNodeId(),
+      id: Editor.createNodeId(),
     ));
   }
 
@@ -278,10 +282,20 @@ class _MarkdownToDocument implements md.NodeVisitor {
   }) {
     _content.add(
       ListItemNode(
-        id: DocumentEditor.createNodeId(),
+        id: Editor.createNodeId(),
         itemType: listItemType,
         indent: indent,
         text: _parseInlineText(element),
+      ),
+    );
+  }
+
+  void _addTask(md.Element element) {
+    _content.add(
+      TaskNode(
+        id: Editor.createNodeId(),
+        text: _parseInlineText(element),
+        isComplete: element.attributes['completed'] == 'true',
       ),
     );
   }
@@ -358,7 +372,7 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
   @override
   void visitText(md.Text text) {
     final attributedText = _textStack.removeLast();
-    _textStack.add(attributedText.copyAndAppend(AttributedText(text: text.text)));
+    _textStack.add(attributedText.copyAndAppend(AttributedText(text.text)));
   }
 
   @override
@@ -370,42 +384,27 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
     if (element.tag == 'strong') {
       styledText.addAttribution(
         boldAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == 'em') {
       styledText.addAttribution(
         italicsAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == "del") {
       styledText.addAttribution(
         strikethroughAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == "u") {
       styledText.addAttribution(
         underlineAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == 'a') {
       styledText.addAttribution(
         LinkAttribution(url: Uri.parse(element.attributes['href']!)),
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     }
 
@@ -446,8 +445,8 @@ class UnderlineSyntax extends md.TagSyntax {
 class _ParagraphWithAlignmentSyntax extends _EmptyLinePreservingParagraphSyntax {
   /// This pattern matches the text aligment notation.
   ///
-  /// Possible values are `:---`, `:---:` and `---:`
-  static final _alignmentNotationPattern = RegExp(r'^:-{3}|:-{3}:|-{3}:$');
+  /// Possible values are `:---`, `:---:`, `---:` and `-::-`.
+  static final _alignmentNotationPattern = RegExp(r'^:-{3}|:-{3}:|-{3}:|-::-$');
 
   const _ParagraphWithAlignmentSyntax();
 
@@ -506,6 +505,8 @@ class _ParagraphWithAlignmentSyntax extends _EmptyLinePreservingParagraphSyntax 
         return 'center';
       case '---:':
         return 'right';
+      case '-::-':
+        return 'justify';
       // As we already check that the input matches the notation,
       // we shouldn't reach this point.
       default:
@@ -642,6 +643,57 @@ class _LineBreakSeparatedElement extends md.Element {
   }
 }
 
+/// A [md.BlockSyntax] that parses tasks.
+///
+/// A compled task starts with `- [x] ` followed by the task's content.
+///
+/// An incomplete task starts with `- [ ] ` followed by the task's content.
+///
+/// Tasks can have multiple lines of content.
+class _TaskSyntax extends md.BlockSyntax {
+  const _TaskSyntax();
+
+  /// Parses the first line of a task.
+  ///
+  /// `- [x] ` or `- [ ]` followed by any text.
+  @override
+  RegExp get pattern => RegExp(r'^- \[( |x)\] (.*)');
+
+  @override
+  md.Node? parse(md.BlockParser parser) {
+    final match = pattern.firstMatch(parser.current);
+    if (match == null) {
+      return null;
+    }
+
+    final completionToken = match.group(1)!;
+    final taskDescriptionFirstLine = match.group(2)!;
+
+    final buffer = StringBuffer(taskDescriptionFirstLine);
+
+    // Move to the second line.
+    parser.advance();
+
+    // Consume the following lines until we:
+    // - reach the end of the input OR
+    // - find a blank line OR
+    // - find the start of another block element (including another task)
+    while (!parser.isDone &&
+        !_blankLinePattern.hasMatch(parser.current) &&
+        !_standardNonParagraphBlockSyntaxes.any((syntax) => syntax.pattern.hasMatch(parser.current))) {
+      buffer.write('\n');
+      buffer.write(parser.current);
+
+      parser.advance();
+    }
+
+    return md.Element(
+      'task',
+      [md.Text(buffer.toString())],
+    )..attributes['completed'] = (completionToken == 'x').toString();
+  }
+}
+
 /// Matches empty lines or lines containing only whitespace.
 final _blankLinePattern = RegExp(r'^(?:[ \t]*)$');
 
@@ -651,6 +703,7 @@ const List<md.BlockSyntax> _standardNonParagraphBlockSyntaxes = [
   md.FencedCodeBlockSyntax(),
   md.BlockquoteSyntax(),
   md.HorizontalRuleSyntax(),
+  _TaskSyntax(),
   md.UnorderedListSyntax(),
   md.OrderedListSyntax(),
 ];

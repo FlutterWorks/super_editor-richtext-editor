@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:golden_toolkit/golden_toolkit.dart';
 import 'package:super_editor/super_editor.dart';
-
-import '../test_tools.dart';
 
 void main() {
   group('SuperTextField', () {
@@ -21,7 +20,7 @@ void main() {
       final heightWithHintText = tester.getSize(find.byType(SuperTextField)).height;
 
       // Change the text, this should recompute viewport height.
-      controller.text = AttributedText(text: 'Leave a message');
+      controller.text = AttributedText('Leave a message');
       await tester.pumpAndSettle();
 
       // When the text field has content the line height should be the true line height.

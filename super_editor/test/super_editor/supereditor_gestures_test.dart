@@ -1,11 +1,14 @@
-import 'dart:ui';
-
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_runners/flutter_test_runners.dart';
+import 'package:super_editor/src/infrastructure/links.dart';
+import 'package:super_editor/src/infrastructure/platforms/android/selection_handles.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
 import '../test_tools.dart';
-import 'document_test_tools.dart';
+import 'supereditor_test_tools.dart';
 
 void main() {
   group('SuperEditor gestures', () {
@@ -31,7 +34,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.first.id,
+            nodeId: testContext.findEditContext().document.nodes.first.id,
             nodePosition: const TextNodePosition(offset: 0),
           ),
         ),
@@ -60,7 +63,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.first.id,
+            nodeId: testContext.findEditContext().document.nodes.first.id,
             nodePosition: const TextNodePosition(offset: 0),
           ),
         ),
@@ -89,7 +92,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.first.id,
+            nodeId: testContext.findEditContext().document.nodes.first.id,
             nodePosition: const TextNodePosition(offset: 0),
           ),
         ),
@@ -118,7 +121,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.first.id,
+            nodeId: testContext.findEditContext().document.nodes.first.id,
             nodePosition: const TextNodePosition(offset: 0),
           ),
         ),
@@ -147,7 +150,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.first.id,
+            nodeId: testContext.findEditContext().document.nodes.first.id,
             nodePosition: const TextNodePosition(offset: 0),
           ),
         ),
@@ -172,7 +175,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.last.id,
+            nodeId: testContext.findEditContext().document.nodes.last.id,
             nodePosition: const TextNodePosition(offset: 14),
           ),
         ),
@@ -196,7 +199,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: testContext.editContext.editor.document.nodes.first.id,
+            nodeId: testContext.findEditContext().document.nodes.first.id,
             nodePosition: const TextNodePosition(offset: 0),
           ),
         ),
@@ -489,6 +492,77 @@ spans multiple lines.''',
       // Ensure no drag handle is displayed.
       expect(find.byType(AndroidSelectionHandle), findsNothing);
       expect(find.byType(IosDocumentTouchEditingControls), findsNothing);
+    });
+
+    group("interaction mode", () {
+      group("when active", () {
+        testWidgetsOnAllPlatforms("launches URL on tap", (tester) async {
+          // Setup test version of UrlLauncher to log URL launches.
+          final testUrlLauncher = TestUrlLauncher();
+          UrlLauncher.instance = testUrlLauncher;
+          addTearDown(() => UrlLauncher.instance = null);
+
+          // Pump the UI.
+          final context = await tester //
+              .createDocument()
+              .withSingleParagraphAndLink()
+              .autoFocus(true)
+              .pump();
+
+          // Activate interaction mode.
+          if (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS) {
+            // On mobile, there's no hardware keyboard to easily activate
+            // interaction mode. In practice, app developers will decide
+            // when/how to activate interaction mode on mobile. Rather than
+            // add buttons in our test just for this purpose, we'll explicitly
+            // activate interaction mode.
+            context.findEditContext().editor.execute([
+              const ChangeInteractionModeRequest(isInteractionModeDesired: true),
+            ]);
+          } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+            // Press CMD to activate interaction mode on Mac.
+            await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+          } else {
+            // Press CTRL to activate interaction mode on Windows and Linux.
+            await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+          }
+
+          // Ensure that interaction mode is "on".
+          expect(context.findEditContext().composer.isInInteractionMode.value, isTrue);
+
+          // Tap on the link.
+          await tester.tapInParagraph("1", 27);
+
+          // Ensure that we tried to launch the URL.
+          expect(testUrlLauncher.urlLaunchLog.length, 1);
+          expect(testUrlLauncher.urlLaunchLog.first.toString(), "https://fake.url");
+        });
+      });
+
+      group("when inactive", () {
+        testWidgetsOnAllPlatforms("doesn't launch URL on tap", (tester) async {
+          // Setup test version of UrlLauncher to log URL launches.
+          final testUrlLauncher = TestUrlLauncher();
+          UrlLauncher.instance = testUrlLauncher;
+          addTearDown(() => UrlLauncher.instance = null);
+
+          // Pump the UI.
+          final context = await tester //
+              .createDocument()
+              .withSingleParagraphAndLink()
+              .autoFocus(true)
+              .pump();
+
+          // Ensure that interaction mode is "off".
+          expect(context.findEditContext().composer.isInInteractionMode.value, isFalse);
+
+          // Tap on the link.
+          await tester.tapInParagraph("1", 27);
+
+          // Ensure that we DIDN'T try to launch the URL.
+          expect(testUrlLauncher.urlLaunchLog.length, 0);
+        });
+      });
     });
   });
 }

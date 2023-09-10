@@ -1,59 +1,68 @@
 name: super_editor
 description: Configurable, composable, extensible text editor and document renderer for Flutter.
-version: 0.2.3-dev.1
+version: 0.2.6-dev.1
 homepage: https://github.com/superlistapp/super_editor
 
 screenshots:
-  - description: 'SuperEditor on Mac desktop'
+  - description: "SuperEditor on Mac desktop"
     path: doc/marketing/screenshot_mac_desktop.png
-  - description: 'SuperEditor dark mode'
+  - description: "SuperEditor dark mode"
     path: doc/marketing/screenshot_mac_desktop_dark-mode.png
-  - description: 'SuperEditor text selection'
+  - description: "SuperEditor text selection"
     path: doc/marketing/screenshot_mac_desktop_text-selection.png
-  - description: 'SuperEditor text styles'
+  - description: "SuperEditor text styles"
     path: doc/marketing/screenshot_mac_desktop_bold-selection.png
 
 environment:
-  sdk: ">=2.12.0 <3.0.0"
+  sdk: ">=3.0.0 <4.0.0"
   flutter: ">=1.17.0"
 
 dependencies:
   flutter:
     sdk: flutter
 
-  attributed_text: ^0.2.0
+  attributed_text: ^0.2.2
   characters: ^1.2.0
   collection: ^1.15.0
-  http: ^0.13.1
-  linkify: ^4.0.0
+  follow_the_leader: ^0.0.4+3
+  http: ">=0.13.1 <2.0.0"
+  linkify: ^5.0.0
   logging: ^1.0.1
-  super_text_layout: ^0.1.4
+  super_text_layout: ^0.1.7
+  url_launcher: ^6.1.9
   uuid: ^3.0.3
+  overlord: ^0.0.3
 
   # Dependencies for testing tools that we ship with super_editor
   flutter_test:
     sdk: flutter
-  flutter_test_robots: ^0.0.17
+  flutter_test_robots: 0.0.21
 
 dependency_overrides:
-  # Override to local mono-repo path so devs can test this repo
-  # against changes that they're making to other mono-repo packages
+  #  # Override to local mono-repo path so devs can test this repo
+  #  # against changes that they're making to other mono-repo packages
   attributed_text:
     path: ../attributed_text
   super_text_layout:
     path: ../super_text_layout
-  flutter_test_robots:
-    git: 
-      url: https://github.com/Flutter-Bounty-Hunters/flutter_test_robots
+#
+#  flutter_test_robots:
+#    git:
+#      url: https://github.com/Flutter-Bounty-Hunters/flutter_test_robots
 
 dev_dependencies:
   flutter_lints: ^2.0.1
-  golden_toolkit: ^0.11.0
+  golden_toolkit: ^0.15.0
   mockito: ^5.0.4
   super_editor_markdown:
     path: ../super_editor_markdown
   text_table: ^4.0.1
   meta: ^1.8.0
+  args: ^2.3.1
+  path: ^1.8.3
+  golden_runner:
+    path: ../golden_runner
+  flutter_test_runners: ^0.0.4
 
 flutter:
   # no Flutter configuration

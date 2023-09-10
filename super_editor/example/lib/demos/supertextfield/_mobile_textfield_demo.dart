@@ -9,14 +9,18 @@ class MobileSuperTextFieldDemo extends StatefulWidget {
   const MobileSuperTextFieldDemo({
     Key? key,
     required this.initialText,
+    required this.textFieldFocusNode,
+    required this.textFieldTapRegionGroupId,
     required this.createTextField,
   }) : super(key: key);
 
   final AttributedText initialText;
+  final FocusNode textFieldFocusNode;
+  final String textFieldTapRegionGroupId;
   final Widget Function(MobileTextFieldDemoConfig) createTextField;
 
   @override
-  _MobileSuperTextFieldDemoState createState() => _MobileSuperTextFieldDemoState();
+  State<MobileSuperTextFieldDemo> createState() => _MobileSuperTextFieldDemoState();
 }
 
 class _MobileSuperTextFieldDemoState extends State<MobileSuperTextFieldDemo> {
@@ -89,17 +93,15 @@ class _MobileSuperTextFieldDemoState extends State<MobileSuperTextFieldDemo> {
         children: [
           Expanded(
             child: Scaffold(
-              body: GestureDetector(
-                onTap: () {
-                  _screenFocusNode.requestFocus();
-                },
-                behavior: HitTestBehavior.translucent,
-                child: Focus(
-                  focusNode: _screenFocusNode,
-                  child: SafeArea(
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 48),
+              body: Focus(
+                focusNode: _screenFocusNode,
+                child: SafeArea(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 48),
+                      child: TapRegion(
+                        groupId: widget.textFieldTapRegionGroupId,
+                        onTapOutside: (_) => widget.textFieldFocusNode.unfocus(),
                         child: widget.createTextField(_createDemoConfig()),
                       ),
                     ),

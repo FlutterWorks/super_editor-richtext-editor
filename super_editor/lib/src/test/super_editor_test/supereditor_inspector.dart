@@ -20,6 +20,34 @@ class SuperEditorInspector {
     return superEditor.focusNode.hasFocus;
   }
 
+  /// Returns `true` if the given [SuperEditor] widget currently has an open IME connection,
+  /// or `false` if no IME connection is open, or if [SuperEditor] is in keyboard mode.
+  ///
+  /// {@template supereditor_finder}
+  /// By default, this method expects a single [SuperEditor] in the widget tree and
+  /// finds it `byType`. To specify one [SuperEditor] among many, pass a [superEditorFinder].
+  /// {@endtemplate}
+  static bool isImeConnectionOpen([Finder? finder]) {
+    final element = (finder ?? find.byType(SuperEditor)).evaluate().single as StatefulElement;
+    final superEditor = element.widget as SuperEditor;
+
+    // Keyboard mode never has an IME connection.
+    if (superEditor.inputSource == TextInputSource.keyboard) {
+      return false;
+    }
+
+    final imeInteractorElement = find
+        .descendant(
+          of: find.byWidget(superEditor),
+          matching: find.byType(SuperEditorImeInteractor),
+        )
+        .evaluate()
+        .single as StatefulElement;
+    final imeInteractor = imeInteractorElement.state as SuperEditorImeInteractorState;
+
+    return imeInteractor.isAttachedToIme;
+  }
+
   /// Returns the [Document] within the [SuperEditor] matched by [finder],
   /// or the singular [SuperEditor] in the widget tree, if [finder] is `null`.
   ///
@@ -27,7 +55,17 @@ class SuperEditorInspector {
   static Document? findDocument([Finder? finder]) {
     final element = (finder ?? find.byType(SuperEditor)).evaluate().single as StatefulElement;
     final superEditor = element.state as SuperEditorState;
-    return superEditor.editContext.editor.document;
+    return superEditor.editContext.document;
+  }
+
+  /// Returns the [DocumentComposer] within the [SuperEditor] matched by [finder],
+  /// or the singular [SuperEditor] in the widget tree, if [finder] is `null`.
+  ///
+  /// {@macro supereditor_finder}
+  static DocumentComposer? findComposer([Finder? finder]) {
+    final element = (finder ?? find.byType(SuperEditor)).evaluate().single as StatefulElement;
+    final superEditor = element.state as SuperEditorState;
+    return superEditor.editContext.composer;
   }
 
   /// Returns the current [DocumentSelection] for the [SuperEditor] matched by
@@ -113,7 +151,7 @@ class SuperEditorInspector {
   /// {@macro supereditor_finder}
   static WidgetType findWidgetForComponent<WidgetType>(String nodeId, [Finder? superEditorFinder]) {
     final documentLayout = _findDocumentLayout(superEditorFinder);
-    final widget = (documentLayout.getComponentByNodeId(nodeId) as TextComponentState).widget;
+    final widget = (documentLayout.getComponentByNodeId(nodeId) as State).widget;
     if (widget is! WidgetType) {
       throw Exception("Looking for a component's widget. Expected type $WidgetType, but found ${widget.runtimeType}");
     }
@@ -133,11 +171,13 @@ class SuperEditorInspector {
     return (documentLayout.getComponentByNodeId(nodeId) as TextComponentState).widget.text;
   }
 
-  /// Finds and returns the [TextStyle] that's applied to the top-level of the [TextSpan]
-  /// in the paragraph with the given [nodeId].
+  /// Finds the paragraph with the given [nodeId] and returns the paragraph's content as a [TextSpan].
+  ///
+  /// A [TextSpan] is the fundamental way that Flutter styles text. It's the lowest level reflection
+  /// of what the user will see, short of rendering the actual UI.
   ///
   /// {@macro supereditor_finder}
-  static TextStyle? findParagraphStyle(String nodeId, [Finder? superEditorFinder]) {
+  static TextSpan findRichTextInParagraph(String nodeId, [Finder? superEditorFinder]) {
     final documentLayout = _findDocumentLayout(superEditorFinder);
 
     final textComponentState = documentLayout.getComponentByNodeId(nodeId) as TextComponentState;
@@ -146,7 +186,15 @@ class SuperEditorInspector {
         .evaluate()
         .single
         .widget as SuperTextWithSelection;
-    return superTextWithSelection.richText.style;
+    return superTextWithSelection.richText as TextSpan;
+  }
+
+  /// Finds and returns the [TextStyle] that's applied to the top-level of the [TextSpan]
+  /// in the paragraph with the given [nodeId].
+  ///
+  /// {@macro supereditor_finder}
+  static TextStyle? findParagraphStyle(String nodeId, [Finder? superEditorFinder]) {
+    return findRichTextInParagraph(nodeId, superEditorFinder).style;
   }
 
   /// Returns the [DocumentNode] at given the [index].

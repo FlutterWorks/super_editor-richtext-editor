@@ -1,6 +1,7 @@
 import 'package:example/demos/components/demo_text_with_hint.dart';
 import 'package:example/demos/components/demo_unselectable_hr.dart';
 import 'package:example/demos/debugging/simple_deltas_input.dart';
+import 'package:example/demos/demo_animated_task_height.dart';
 import 'package:example/demos/demo_app_shortcuts.dart';
 import 'package:example/demos/demo_empty_document.dart';
 import 'package:example/demos/demo_markdown_serialization.dart';
@@ -10,9 +11,13 @@ import 'package:example/demos/demo_selectable_text.dart';
 import 'package:example/demos/editor_configs/demo_mobile_editing_android.dart';
 import 'package:example/demos/editor_configs/demo_mobile_editing_ios.dart';
 import 'package:example/demos/example_editor/example_editor.dart';
+import 'package:example/demos/in_the_lab/feature_action_tags.dart';
+import 'package:example/demos/in_the_lab/feature_pattern_tags.dart';
+import 'package:example/demos/in_the_lab/feature_stable_tags.dart';
 import 'package:example/demos/flutter_features/demo_inline_widgets.dart';
 import 'package:example/demos/flutter_features/textinputclient/basic_text_input_client.dart';
 import 'package:example/demos/flutter_features/textinputclient/textfield.dart';
+import 'package:example/demos/in_the_lab/selected_text_colors_demo.dart';
 import 'package:example/demos/scrolling/demo_task_and_chat_with_customscrollview.dart';
 import 'package:example/demos/sliver_example_editor.dart';
 import 'package:example/demos/styles/demo_doc_styles.dart';
@@ -35,16 +40,19 @@ import 'demos/supertextfield/android/demo_superandroidtextfield.dart';
 /// Demo of a basic text editor, as well as various widgets that
 /// are available in this package.
 Future<void> main() async {
-  initLoggers(Level.FINEST, {
+  initLoggers(Level.FINE, {
     // editorScrollingLog,
     // editorGesturesLog,
     // editorImeLog,
+    // editorImeDeltasLog,
     // editorKeyLog,
     // editorOpsLog,
     // editorLayoutLog,
     // editorDocLog,
     // editorStyleLog,
     // textFieldLog,
+    // editorUserTagsLog,
+    // contentLayersLog,
     appLog,
   });
 
@@ -79,7 +87,7 @@ class SuperEditorDemoApp extends StatelessWidget {
 /// options in a drawer.
 class HomeScreen extends StatefulWidget {
   @override
-  _HomeScreenState createState() => _HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
@@ -256,6 +264,50 @@ final _menu = <_MenuGroup>[
           return EmptyDocumentDemo();
         },
       ),
+      _MenuItem(
+        icon: Icons.description,
+        title: 'Animated task height demo',
+        pageBuilder: (context) {
+          return AnimatedTaskHeightDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
+    title: 'FEATURES',
+    items: [],
+  ),
+  _MenuGroup(
+    title: 'IN THE LAB',
+    items: [
+      _MenuItem(
+        icon: Icons.color_lens,
+        title: 'Selected Text Colors',
+        pageBuilder: (context) {
+          return const SelectedTextColorsDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.tag,
+        title: 'Hash Tags',
+        pageBuilder: (context) {
+          return const HashTagsFeatureDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.account_circle,
+        title: 'User Tags',
+        pageBuilder: (context) {
+          return const UserTagsFeatureDemo();
+        },
+      ),
+      _MenuItem(
+        icon: Icons.task,
+        title: 'Action Tags',
+        pageBuilder: (context) {
+          return const ActionTagsFeatureDemo();
+        },
+      ),
     ],
   ),
   _MenuGroup(
@@ -296,7 +348,7 @@ final _menu = <_MenuGroup>[
         icon: Icons.text_snippet,
         title: 'SuperReader',
         pageBuilder: (context) {
-          return SuperReaderDemo();
+          return const SuperReaderDemo();
         },
       ),
       _MenuItem(

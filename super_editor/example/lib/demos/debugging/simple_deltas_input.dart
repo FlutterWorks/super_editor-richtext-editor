@@ -9,12 +9,12 @@ import 'package:super_text_layout/super_text_layout.dart';
 /// all the rest of Super Editor into the picture.
 class SimpleDeltasInputDemo extends StatefulWidget {
   @override
-  _SimpleDeltasInputState createState() => _SimpleDeltasInputState();
+  State<SimpleDeltasInputDemo> createState() => _SimpleDeltasInputState();
 }
 
 class _SimpleDeltasInputState extends State<SimpleDeltasInputDemo> with TextInputClient, DeltaTextInputClient {
   final _textGlobalKey = GlobalKey(debugLabel: "text_input");
-  AttributedText _text = AttributedText(text: "Hello, world!");
+  AttributedText _text = AttributedText("Hello, world!");
 
   @override
   void initState() {
@@ -149,7 +149,7 @@ class _SimpleDeltasInputState extends State<SimpleDeltasInputDemo> with TextInpu
 
       setState(() {
         _currentTextEditingValue = delta.apply(currentTextEditingValue!);
-        _text = AttributedText(text: _currentTextEditingValue!.text);
+        _text = AttributedText(_currentTextEditingValue!.text);
       });
     }
 

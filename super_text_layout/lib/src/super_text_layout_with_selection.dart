@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:super_text_layout/src/infrastructure/blink_controller.dart';
 import 'package:super_text_layout/super_text_layout_logging.dart';
 
 import 'caret_layer.dart';
@@ -22,6 +23,7 @@ class SuperTextWithSelection extends StatefulWidget {
     required this.richText,
     this.textAlign = TextAlign.left,
     this.textDirection = TextDirection.ltr,
+    this.textScaler,
     UserSelection? userSelection,
   })  : userSelections = userSelection != null ? [userSelection] : const [],
         super(key: key);
@@ -32,6 +34,7 @@ class SuperTextWithSelection extends StatefulWidget {
     required this.richText,
     this.textAlign = TextAlign.left,
     this.textDirection = TextDirection.ltr,
+    this.textScaler,
     this.userSelections = const [],
   }) : super(key: key);
 
@@ -51,6 +54,11 @@ class SuperTextWithSelection extends StatefulWidget {
   ///
   /// A user selection includes a caret and a selection highlight.
   final List<UserSelection> userSelections;
+
+  /// The policy for text scaling.
+  ///
+  /// Defaults to `MediaQuery.textScalerOf`.
+  final TextScaler? textScaler;
 
   @override
   State<SuperTextWithSelection> createState() => _SuperTextWithSelectionState();
@@ -98,6 +106,7 @@ class _SuperTextWithSelectionState extends ProseTextState<SuperTextWithSelection
       textLayoutKey: _textLayoutKey,
       richText: widget.richText,
       textAlign: widget.textAlign,
+      textScaler: widget.textScaler ?? MediaQuery.textScalerOf(context),
       userSelections: _userSelections,
     );
   }
@@ -109,12 +118,14 @@ class _RebuildOptimizedSuperTextWithSelection extends StatefulWidget {
     this.textLayoutKey,
     required this.richText,
     this.textAlign = TextAlign.left,
+    this.textScaler = TextScaler.noScaling,
     required this.userSelections,
   }) : super(key: key);
 
   final Key? textLayoutKey;
   final InlineSpan richText;
   final TextAlign textAlign;
+  final TextScaler textScaler;
 
   final ValueNotifier<List<UserSelection>> userSelections;
 
@@ -151,6 +162,14 @@ class _RebuildOptimizedSuperTextWithSelectionState extends State<_RebuildOptimiz
       // the cache so that the full SuperText widget subtree is rebuilt.
       _cachedSubtree = null;
     }
+
+    if (widget.textScaler != oldWidget.textScaler) {
+      buildsLog.fine("Text scaler changed. Invalidating the cached SuperText widget.");
+
+      // The text scaleFactor changed, which means the text layout changed. Invalidate
+      // the cache so that the full SuperText widget subtree is rebuilt.
+      _cachedSubtree = null;
+    }
   }
 
   // The current length of the text displayed by this widget. The value
@@ -177,6 +196,7 @@ class _RebuildOptimizedSuperTextWithSelectionState extends State<_RebuildOptimiz
       key: widget.textLayoutKey,
       richText: widget.richText,
       textAlign: widget.textAlign,
+      textScaler: widget.textScaler,
       layerBeneathBuilder: _buildLayerBeneath,
       layerAboveBuilder: _buildLayerAbove,
     );
@@ -225,6 +245,7 @@ class _RebuildOptimizedSuperTextWithSelectionState extends State<_RebuildOptimiz
                   textLayout: textLayout,
                   style: userSelection.caretStyle,
                   blinkCaret: userSelection.blinkCaret,
+                  blinkTimingMode: userSelection.blinkTimingMode,
                   position: userSelection.selection.extent,
                   caretTracker: userSelection.caretFollower,
                 ),
@@ -245,6 +266,7 @@ class UserSelection {
     this.highlightBoundsFollower,
     this.caretStyle = const CaretStyle(),
     this.blinkCaret = true,
+    this.blinkTimingMode = BlinkTimingMode.ticker,
     this.hasCaret = true,
     this.caretFollower,
   });
@@ -276,6 +298,11 @@ class UserSelection {
   /// Whether the caret should blink.
   final bool blinkCaret;
 
+  /// The timing mechanism used to blink, e.g., `Ticker` or `Timer`.
+  ///
+  /// `Timer`s are not expected to work in tests.
+  final BlinkTimingMode blinkTimingMode;
+
   /// Whether this selection includes the user's caret.
   ///
   /// Typically, there is only one caret per user within an entire
@@ -296,6 +323,7 @@ class UserSelection {
     bool? highlightWhenEmpty,
     LayerLink? highlightBoundsFollower,
     CaretStyle? caretStyle,
+    BlinkTimingMode? blinkTimingMode,
     bool? blinkCaret,
     bool? hasCaret,
     LayerLink? caretFollower,
@@ -309,6 +337,7 @@ class UserSelection {
       blinkCaret: blinkCaret ?? this.blinkCaret,
       hasCaret: hasCaret ?? this.hasCaret,
       caretFollower: caretFollower ?? this.caretFollower,
+      blinkTimingMode: blinkTimingMode ?? this.blinkTimingMode,
     );
   }
 
@@ -322,6 +351,7 @@ class UserSelection {
           highlightWhenEmpty == other.highlightWhenEmpty &&
           highlightBoundsFollower == other.highlightBoundsFollower &&
           caretStyle == other.caretStyle &&
+          blinkTimingMode == other.blinkTimingMode &&
           blinkCaret == other.blinkCaret &&
           hasCaret == other.hasCaret &&
           caretFollower == other.caretFollower;
@@ -333,6 +363,7 @@ class UserSelection {
       highlightWhenEmpty.hashCode ^
       highlightBoundsFollower.hashCode ^
       caretStyle.hashCode ^
+      blinkTimingMode.hashCode ^
       blinkCaret.hashCode ^
       hasCaret.hashCode ^
       caretFollower.hashCode;

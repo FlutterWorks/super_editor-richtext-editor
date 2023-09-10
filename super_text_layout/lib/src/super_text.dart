@@ -27,6 +27,7 @@ class SuperText extends StatefulWidget {
     required this.richText,
     this.textAlign = TextAlign.left,
     this.textDirection = TextDirection.ltr,
+    this.textScaler,
     this.layerBeneathBuilder,
     this.layerAboveBuilder,
     this.debugTrackTextBuilds = false,
@@ -52,6 +53,11 @@ class SuperText extends StatefulWidget {
   /// builds its inner rich text, so that tests can ensure the inner text
   /// is not rebuilt unnecessarily, due to text decorations.
   final bool debugTrackTextBuilds;
+
+  /// The text scaling policy.
+  ///
+  /// Defaults to `MediaQuery.textScalerOf`.
+  final TextScaler? textScaler;
 
   @override
   State<SuperText> createState() => SuperTextState();
@@ -84,6 +90,7 @@ class SuperTextState extends State<SuperText> with ProseTextBlock {
       text: LayoutAwareRichText(
         text: widget.richText,
         textAlign: widget.textAlign,
+        textScaler: widget.textScaler ?? MediaQuery.textScalerOf(context),
         onMarkNeedsLayout: _invalidateParagraph,
       ),
       background: LayoutBuilder(
@@ -288,8 +295,14 @@ class LayoutAwareRichText extends RichText {
     Key? key,
     required InlineSpan text,
     TextAlign textAlign = TextAlign.left,
+    TextScaler textScaler = TextScaler.noScaling,
     required this.onMarkNeedsLayout,
-  }) : super(key: key, text: text, textAlign: textAlign);
+  }) : super(
+          key: key,
+          text: text,
+          textAlign: textAlign,
+          textScaler: textScaler,
+        );
 
   /// Callback invoked when the underlying [RenderParagraph] invalidates
   /// its layout.
@@ -304,7 +317,7 @@ class LayoutAwareRichText extends RichText {
       textDirection: textDirection ?? Directionality.of(context),
       softWrap: softWrap,
       overflow: overflow,
-      textScaleFactor: textScaleFactor,
+      textScaler: textScaler,
       maxLines: maxLines,
       strutStyle: strutStyle,
       textWidthBasis: textWidthBasis,
@@ -323,7 +336,7 @@ class LayoutAwareRichText extends RichText {
       ..textDirection = textDirection ?? Directionality.of(context)
       ..softWrap = softWrap
       ..overflow = overflow
-      ..textScaleFactor = textScaleFactor
+      ..textScaler = textScaler
       ..maxLines = maxLines
       ..strutStyle = strutStyle
       ..textWidthBasis = textWidthBasis
@@ -343,7 +356,7 @@ class RenderLayoutAwareParagraph extends RenderParagraph {
     required TextDirection textDirection,
     bool softWrap = true,
     TextOverflow overflow = TextOverflow.clip,
-    double textScaleFactor = 1.0,
+    TextScaler textScaler = TextScaler.noScaling,
     int? maxLines,
     Locale? locale,
     StrutStyle? strutStyle,
@@ -358,7 +371,7 @@ class RenderLayoutAwareParagraph extends RenderParagraph {
           textDirection: textDirection,
           softWrap: softWrap,
           overflow: overflow,
-          textScaleFactor: textScaleFactor,
+          textScaler: textScaler,
           maxLines: maxLines,
           locale: locale,
           strutStyle: strutStyle,

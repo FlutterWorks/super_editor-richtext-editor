@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
+import 'package:super_editor/src/infrastructure/multi_listenable_builder.dart';
 
 // TODO: Write golden tests for scrolling minimap
 //       (Matt - April, 2022) - I tried writing the tests but couldn't get the
@@ -47,7 +48,7 @@ class _ScrollingMinimapsState extends State<ScrollingMinimaps> with ScrollingMin
   }
 }
 
-abstract class ScrollingMinimapsRepository {
+abstract mixin class ScrollingMinimapsRepository {
   bool hasInstrumentation(String id) => get(id) != null;
 
   ScrollableInstrumentation? get(String id);
@@ -98,9 +99,7 @@ class _ScrollingMinimapState extends State<ScrollingMinimap> {
     }
     if (!viewportBox.hasSize) {
       // The viewport hasn't laid out yet. Try again next frame.
-      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-        setState(() {});
-      });
+      scheduleBuildAfterBuild();
       return const SizedBox();
     }
 

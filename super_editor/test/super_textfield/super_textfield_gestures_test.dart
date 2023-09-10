@@ -2,10 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/super_editor.dart';
 
-import '../test_tools.dart';
 import 'super_textfield_inspector.dart';
+import 'super_textfield_robot.dart';
 
 void main() {
   group('SuperTextField gestures', () {
@@ -240,6 +241,107 @@ void main() {
         expect(SuperTextFieldInspector.findSelection()!.extent.offset, 0);
       });
 
+      // mobile only because precise input (mouse) doesn't use touch slop
+      testWidgetsOnMobile("MediaQuery gesture settings are respected", (tester) async {
+        bool horizontalDragStartCalled = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: GestureDetector(
+                onHorizontalDragStart: (d) {
+                  horizontalDragStartCalled = true;
+                },
+                child: Builder(builder: (context) {
+                  // Custom gesture settings that ensure same value for touchSlop
+                  // and panSlop
+                  final data = MediaQuery.of(context).copyWith(
+                    gestureSettings: const _GestureSettings(
+                      panSlop: 18,
+                      touchSlop: 18,
+                    ),
+                  );
+                  return MediaQuery(
+                    data: data,
+                    child: SuperTextField(
+                      textController: AttributedTextEditingController(
+                        text: AttributedText('a b c'),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+        );
+
+        // Tap down and up so the field is focused.
+        await tester.placeCaretInSuperTextField(0);
+
+        expect(
+          SuperTextFieldInspector.findSelection(),
+          const TextSelection.collapsed(offset: 0),
+        );
+
+        // The gesture should trigger the selection PanGestureRecognizer instead
+        // the HorizontalDragGestureRecognizer below.
+
+        final gesture = await tester.startGesture(tester.getTopLeft(find.byType(SuperTextField)));
+        addTearDown(() => gesture.removePointer());
+        await gesture.moveBy(const Offset(19, 0));
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(horizontalDragStartCalled, isFalse);
+        expect(
+          SuperTextFieldInspector.findSelection(),
+          const TextSelection.collapsed(offset: 1),
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: GestureDetector(
+                onHorizontalDragStart: (d) {
+                  horizontalDragStartCalled = true;
+                },
+                child: Builder(builder: (context) {
+                  // Gesture settings that mimic flutter default where
+                  // panSlop = 2x touchSlop
+                  final data = MediaQuery.of(context).copyWith(
+                    gestureSettings: const _GestureSettings(
+                      touchSlop: 18,
+                      panSlop: 36,
+                    ),
+                  );
+                  return MediaQuery(
+                    data: data,
+                    child: SuperTextField(
+                      textController: AttributedTextEditingController(
+                        text: AttributedText('a b c'),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+        );
+
+        final gesture2 = await tester.startGesture(tester.getTopLeft(find.byType(SuperTextField)));
+        addTearDown(() => gesture2.removePointer());
+        await gesture2.moveBy(const Offset(19, 0));
+        await gesture2.up();
+        await tester.pumpAndSettle();
+
+        // With default gesture settings the horizontal drag recognizer will
+        // win instead of the selection PanGestureRecognizer.
+        expect(horizontalDragStartCalled, isTrue);
+        expect(
+          SuperTextFieldInspector.findSelection(),
+          const TextSelection.collapsed(offset: 0),
+        );
+      });
+
       testWidgetsOnMobile("tap up shows the keyboard if the field already has focus", (tester) async {
         await _pumpTestApp(tester);
 
@@ -300,6 +402,35 @@ void main() {
         expect(controller.isAttachedToIme, true);
       });
     });
+
+    testWidgetsOnAllPlatforms("loses focus when user taps outside in a TapRegion", (tester) async {
+      // Note: the our test scaffold in this suite includes a TapRegion
+      // that removes focus from the field when tapping outside. This test
+      // depends upon that TapRegion.
+      await _pumpTestApp(tester);
+      await tester.pumpAndSettle();
+
+      // Give the text field focus.
+      await tester.tapAt(tester.getCenter(find.byType(SuperTextField)));
+      await tester.pump(kTapMinTime);
+
+      // Ensure that we start with focus.
+      expect(
+        SuperTextFieldInspector.findSelection()!.extentOffset,
+        greaterThan(-1),
+      );
+
+      // Tap outside the text field.
+      await tester.tapAt(tester.getCenter(find.byType(Scaffold)));
+      await tester.pump(kTapMinTime);
+      await tester.pumpAndSettle();
+
+      // Ensure that focus is gone.
+      expect(
+        SuperTextFieldInspector.findSelection(),
+        const TextSelection.collapsed(offset: -1),
+      );
+    });
   });
 }
 
@@ -309,18 +440,56 @@ Future<void> _pumpTestApp(
   EdgeInsets? padding,
   TextAlign? textAlign,
 }) async {
+  final textFieldFocusNode = FocusNode();
+  const tapRegionGroupdId = "test_super_text_field";
+
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: SuperTextField(
-          padding: padding,
-          textAlign: textAlign ?? TextAlign.left,
-          textController: controller ??
-              AttributedTextEditingController(
-                text: AttributedText(text: 'abc'),
+        body: ColoredBox(
+          color: Colors.green,
+          child: TapRegion(
+            groupId: tapRegionGroupdId,
+            onTapOutside: (_) {
+              // Unfocus on tap outside so that we're sure that all gesture tests
+              // pass when using TapRegion's for focus, because apps should be able
+              // to do that.
+              textFieldFocusNode.unfocus();
+            },
+            child: SizedBox.expand(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.black),
+                  ),
+                  child: SuperTextField(
+                    focusNode: textFieldFocusNode,
+                    tapRegionGroupId: tapRegionGroupdId,
+                    padding: padding,
+                    textAlign: textAlign ?? TextAlign.left,
+                    textController: controller ??
+                        AttributedTextEditingController(
+                          text: AttributedText('abc'),
+                        ),
+                  ),
+                ),
               ),
+            ),
+          ),
         ),
       ),
     ),
   );
+}
+
+// Custom gesture settings that ensure panSlop equal to touchSlop
+class _GestureSettings extends DeviceGestureSettings {
+  const _GestureSettings({
+    required double touchSlop,
+    required this.panSlop,
+  }) : super(touchSlop: touchSlop);
+
+  @override
+  final double panSlop;
 }

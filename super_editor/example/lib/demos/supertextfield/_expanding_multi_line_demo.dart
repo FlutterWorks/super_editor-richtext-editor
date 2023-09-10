@@ -1,3 +1,4 @@
+import 'package:example/demos/supertextfield/demo_text_styles.dart';
 import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
@@ -5,22 +6,13 @@ import '_robot.dart';
 
 class ExpandingMultiLineTextFieldDemo extends StatefulWidget {
   @override
-  _ExpandingMultiLineTextFieldDemoState createState() => _ExpandingMultiLineTextFieldDemoState();
+  State<ExpandingMultiLineTextFieldDemo> createState() => _ExpandingMultiLineTextFieldDemoState();
 }
 
 class _ExpandingMultiLineTextFieldDemoState extends State<ExpandingMultiLineTextFieldDemo>
     with TickerProviderStateMixin {
   final _textFieldController = AttributedTextEditingController(
-    text: AttributedText(
-        // text:
-        //     'Super Editor is an open source text editor for Flutter projects.\n\nThis is paragraph 2\n\nThis is paragraph 3',
-        // spans: AttributedSpans(
-        //   attributions: [
-        //     SpanMarker(attribution: 'bold', offset: 0, markerType: SpanMarkerType.start),
-        //     SpanMarker(attribution: 'bold', offset: 11, markerType: SpanMarkerType.end),
-        //   ],
-        // ),
-        ),
+    text: AttributedText(),
   );
 
   GlobalKey<SuperDesktopTextFieldState>? _textKey;
@@ -56,11 +48,11 @@ class _ExpandingMultiLineTextFieldDemoState extends State<ExpandingMultiLineText
       ..selection = const TextSelection.collapsed(offset: 0)
       ..text = AttributedText();
     _demoRobot
-      ..typeText(AttributedText(text: 'Hello World!'))
+      ..typeText(AttributedText('Hello World!'))
       ..pause(const Duration(milliseconds: 500))
-      ..typeText(AttributedText(text: '\n\nThis is a robot typing'))
+      ..typeText(AttributedText('\n\nThis is a robot typing'))
       ..pause(const Duration(milliseconds: 500))
-      ..typeText(AttributedText(text: '\nsome text into a SuperTextField.'))
+      ..typeText(AttributedText('\nsome text into a SuperTextField.'))
       ..start();
   }
 
@@ -110,6 +102,7 @@ class _ExpandingMultiLineTextFieldDemoState extends State<ExpandingMultiLineText
                       );
                     },
                     hintBehavior: HintBehavior.displayHintUntilTextEntered,
+                    textStyleBuilder: demoTextStyleBuilder,
                     minLines: 1,
                     maxLines: 5,
                   ),

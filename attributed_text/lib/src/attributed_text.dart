@@ -17,10 +17,11 @@ final _log = attributionsLog;
 // TODO: there is a mixture of mutable and immutable behavior in this class.
 //       Pick one or the other, or offer 2 classes: mutable and immutable (#113)
 class AttributedText {
-  AttributedText({
-    this.text = '',
+  AttributedText([
+    String? text,
     AttributedSpans? spans,
-  }) : spans = spans ?? AttributedSpans();
+  ])  : text = text ?? "",
+        spans = spans ?? AttributedSpans();
 
   void dispose() {
     _listeners.clear();
@@ -28,6 +29,11 @@ class AttributedText {
 
   /// The text that this [AttributedText] attributes.
   final String text;
+
+  /// Returns the `length` of this [AttributedText]'s [text] `String`.
+  ///
+  /// This accessor is a convenience to avoid writing `myAttText.text.length`.
+  int get length => text.length;
 
   /// The attributes applied to [text].
   final AttributedSpans spans;
@@ -117,6 +123,19 @@ class AttributedText {
     return attributionsThroughout;
   }
 
+  /// Returns all spans in this [AttributedText] for the given [attributions].
+  Set<AttributionSpan> getAttributionSpans(Set<Attribution> attributions) => getAttributionSpansInRange(
+        attributionFilter: (a) => attributions.contains(a),
+        range: SpanRange(0, text.length),
+      );
+
+  /// Returns all spans in this [AttributedText], for attributions that are
+  /// selected by the given [filter].
+  Set<AttributionSpan> getAttributionSpansByFilter(AttributionFilter filter) => getAttributionSpansInRange(
+        attributionFilter: filter,
+        range: SpanRange(0, text.length),
+      );
+
   /// Returns spans for each attribution that (at least partially) appear
   /// within the given [range], as selected by [attributionFilter].
   ///
@@ -126,7 +145,7 @@ class AttributedText {
   /// returned, including the area that sits outside the given [range].
   ///
   /// To obtain attribution spans that are cut down and limited to the
-  /// given [range], pass [true] for [resizeSpansToFitInRange]. This setting
+  /// given [range], pass `true` for [resizeSpansToFitInRange]. This setting
   /// only effects the returned spans, it does not alter the attributions
   /// within this [AttributedText].
   Set<AttributionSpan> getAttributionSpansInRange({
@@ -151,8 +170,16 @@ class AttributedText {
 
   /// Adds the given [attribution] to all characters within the given
   /// [range], inclusive.
-  void addAttribution(Attribution attribution, SpanRange range) {
-    spans.addAttribution(newAttribution: attribution, start: range.start, end: range.end);
+  ///
+  /// When [autoMerge] is `true`, the new attribution is merged with any
+  /// preceding or following attribution whose [Attribution.canMergeWith] returns
+  /// `true`.
+  void addAttribution(
+    Attribution attribution,
+    SpanRange range, {
+    bool autoMerge = true,
+  }) {
+    spans.addAttribution(newAttribution: attribution, start: range.start, end: range.end, autoMerge: autoMerge);
     _notifyListeners();
   }
 
@@ -188,8 +215,12 @@ class AttributedText {
     _notifyListeners();
   }
 
+  /// Copies all text and attributions from [range.start] to [range.end] (exclusive),
+  /// and returns them as a new [AttributedText].
+  AttributedText copyTextInRange(SpanRange range) => copyText(range.start, range.end);
+
   /// Copies all text and attributions from [startOffset] to
-  /// [endOffset], inclusive, and returns them as a new [AttributedText].
+  /// [endOffset], exclusive, and returns them as a new [AttributedText].
   AttributedText copyText(int startOffset, [int? endOffset]) {
     _log.fine('start: $startOffset, end: $endOffset');
 
@@ -207,9 +238,18 @@ class AttributedText {
     _log.fine('offsets, start: $startCopyOffset, end: $endCopyOffset');
 
     return AttributedText(
-      text: text.substring(startOffset, endOffset),
-      spans: spans.copyAttributionRegion(startCopyOffset, endCopyOffset),
+      text.substring(startOffset, endOffset),
+      spans.copyAttributionRegion(startCopyOffset, endCopyOffset),
     );
+  }
+
+  /// Returns a plain-text substring of [text], from [range.start] to [range.end] (exclusive).
+  String substringInRange(SpanRange range) => substring(range.start, range.end);
+
+  /// Returns a plain-text substring of [text], from [start] to [end] (exclusive), or the end of
+  /// [text] if [end] isn't provided.
+  String substring(int start, [int? end]) {
+    return text.substring(start, end);
   }
 
   /// Returns a copy of this [AttributedText] with the [other] text
@@ -220,22 +260,22 @@ class AttributedText {
     if (other.text.isEmpty) {
       _log.fine('`other` has no text. Returning a direct copy of ourselves.');
       return AttributedText(
-        text: text,
-        spans: spans.copy(),
+        text,
+        spans.copy(),
       );
     }
     if (text.isEmpty) {
       _log.fine('our `text` is empty. Returning a direct copy of the `other` text.');
       return AttributedText(
-        text: other.text,
-        spans: other.spans.copy(),
+        other.text,
+        other.spans.copy(),
       );
     }
 
     final newSpans = spans.copy()..addAt(other: other.spans, index: text.length);
     return AttributedText(
-      text: text + other.text,
-      spans: newSpans,
+      text + other.text,
+      newSpans,
     );
   }
 
@@ -273,10 +313,8 @@ class AttributedText {
     _log.fine('endText: $endText');
 
     _log.fine('creating new attributed text for insertion');
-    final insertedText = AttributedText(
-      text: textToInsert,
-    );
-    final insertTextRange = SpanRange(start: 0, end: textToInsert.length - 1);
+    final insertedText = AttributedText(textToInsert);
+    final insertTextRange = SpanRange(0, textToInsert.length - 1);
     for (dynamic attribution in applyAttributions) {
       insertedText.addAttribution(attribution, insertTextRange);
     }
@@ -309,14 +347,33 @@ class AttributedText {
     _log.fine(contractedAttributions.toString());
 
     return AttributedText(
-      text: reducedText,
-      spans: contractedAttributions,
+      reducedText,
+      contractedAttributions,
     );
   }
 
+  /// Visits all attributions in this [AttributedText] by calling [visitor] whenever
+  /// an attribution begins or ends.
+  ///
+  /// If multiple attributions begin or end at the same index, then all of those attributions
+  /// are reported together.
+  ///
+  /// **Only Reports Beginnings and Endings:**
+  ///
+  /// This visitation method does not report all applied attributions at a given index. It
+  /// only reports attributions that begin or end at a specific index.
+  ///
+  /// For example:
+  ///
+  /// Bold:         |xxxxxxxxxxxx|
+  /// Italics:      |------xxxxxx|
+  ///
+  /// Bold is attributed throughout the range. Italics begins at index `6`. When [visitor]
+  /// is notified about italics beginning at `6`, visitor is NOT notified that bold applies
+  /// at that same index.
   void visitAttributions(AttributionVisitor visitor) {
-    final startingAttributions = Set<Attribution>();
-    final endingAttributions = Set<Attribution>();
+    final startingAttributions = <Attribution>{};
+    final endingAttributions = <Attribution>{};
     int currentIndex = -1;
 
     visitor.onVisitBegin();
@@ -350,6 +407,50 @@ class AttributedText {
     visitor.onVisitEnd();
   }
 
+  /// Visits attributions in this [AttributedText], reporting every changing group of
+  /// attributions to the given [visitor].
+  ///
+  /// See [computeAttributionSpans] for an example.
+  ///
+  /// See also:
+  ///
+  ///   * [visitAttributions], to visit attributions markers instead of attribution groups.
+  ///   * [computeAttributionSpans], to work with a list of [MultiAttributionSpan]s instead
+  ///     of visiting each span with a callback.
+  void visitAttributionSpans(AttributionSpanVisitor visitor) {
+    final collapsedSpans = computeAttributionSpans();
+    for (final span in collapsedSpans) {
+      visitor(span);
+    }
+  }
+
+  /// Collapses all attribution markers down into a series of attribution groups,
+  /// starting at the beginning of this [AttributedText], until the end.
+  ///
+  /// A new group of attributions begin wherever an attribution begins or ends.
+  ///
+  /// For example:
+  ///
+  /// Bold:         |----xxxxxxxxxxxx------------|
+  /// Italics:      |-------xxxxxxxxxxxxx--------|
+  /// Strikethru:   |-----------xxxxxxxxxxxxx----|
+  ///
+  /// Given the above attributions, the given [visitor] would be notified of the following
+  /// groups:
+  ///
+  ///  1. [0, 4]   - No attributions
+  ///  2. [5, 8]   - Bold
+  ///  3. [9, 12]  - Bold, Italics
+  ///  4. [13, 16] - Bold, Italics, Strikethru
+  ///  5. [17, 20] - Italics, Strikethru
+  ///  6. [21, 24] - Strikethru
+  ///  7. [25, 28] - No attributions
+  ///
+  /// Attribution groups are useful when computing all style variations for [AttributedText].
+  Iterable<MultiAttributionSpan> computeAttributionSpans() {
+    return spans.collapseSpans(contentLength: text.length);
+  }
+
   @override
   bool operator ==(Object other) {
     return identical(this, other) ||
@@ -361,9 +462,11 @@ class AttributedText {
 
   @override
   String toString() {
-    return '[AttributedText] - "$text"\n' + spans.toString();
+    return '[AttributedText] - "$text"\n$spans';
   }
 }
+
+typedef AttributionSpanVisitor = void Function(MultiAttributionSpan span);
 
 /// Visits every [index] in the the given [AttributedText] which has at least
 /// one start or end marker, passing the attributions that start or end at the [index].
@@ -422,7 +525,12 @@ class CallbackAttributionVisitor implements AttributionVisitor {
   }
 
   @override
-  void visitAttributions(AttributedText fullText, int index, Set<Attribution> startingAttributions, Set<Attribution> endingAttributions) {
+  void visitAttributions(
+    AttributedText fullText,
+    int index,
+    Set<Attribution> startingAttributions,
+    Set<Attribution> endingAttributions,
+  ) {
     _onVisitAttributions(fullText, index, startingAttributions, endingAttributions);
   }
 

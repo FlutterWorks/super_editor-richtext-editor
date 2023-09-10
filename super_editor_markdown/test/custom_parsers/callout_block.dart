@@ -76,7 +76,7 @@ class CalloutElementToNodeConverter implements ElementToNodeConverter {
     }
 
     return ParagraphNode(
-      id: DocumentEditor.createNodeId(),
+      id: Editor.createNodeId(),
       text: _parseInlineText(element),
       metadata: {
         'blockType': const NamedAttribution("callout"),
@@ -144,7 +144,7 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
   @override
   void visitText(md.Text text) {
     final attributedText = _textStack.removeLast();
-    _textStack.add(attributedText.copyAndAppend(AttributedText(text: text.text)));
+    _textStack.add(attributedText.copyAndAppend(AttributedText(text.text)));
   }
 
   @override
@@ -156,42 +156,27 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
     if (element.tag == 'strong') {
       styledText.addAttribution(
         boldAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == 'em') {
       styledText.addAttribution(
         italicsAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == "del") {
       styledText.addAttribution(
         strikethroughAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == "u") {
       styledText.addAttribution(
         underlineAttribution,
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     } else if (element.tag == 'a') {
       styledText.addAttribution(
         LinkAttribution(url: Uri.parse(element.attributes['href']!)),
-        SpanRange(
-          start: 0,
-          end: styledText.text.length - 1,
-        ),
+        SpanRange(0, styledText.text.length - 1),
       );
     }
 

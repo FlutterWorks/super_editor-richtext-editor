@@ -2,11 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
-import '../test_tools.dart';
-import 'document_test_tools.dart';
+import 'supereditor_test_tools.dart';
 import 'test_documents.dart';
 
 void main() {
@@ -111,8 +111,8 @@ class HintTextComponentBuilder implements ComponentBuilder {
           : {},
       // This is the text displayed as a hint.
       hintText: AttributedText(
-        text: 'this is hint text...',
-        spans: AttributedSpans(
+        'this is hint text...',
+        AttributedSpans(
           attributions: [
             const SpanMarker(attribution: italicsAttribution, offset: 12, markerType: SpanMarkerType.start),
             const SpanMarker(attribution: italicsAttribution, offset: 15, markerType: SpanMarkerType.end),

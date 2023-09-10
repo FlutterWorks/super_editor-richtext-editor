@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_robots/flutter_test_robots.dart';
+import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/super_editor.dart';
 
-import '../test_tools.dart';
 import 'super_textfield_robot.dart';
 
 void main() {
@@ -82,7 +82,7 @@ Future<void> _pumpShortcutsAndSuperTextField(
               width: 300,
               child: SuperTextField(
                 textController: AttributedTextEditingController(
-                  text: AttributedText(text: ""),
+                  text: AttributedText(),
                 ),
                 keyboardHandlers: keyboardActions,
               ),

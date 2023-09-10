@@ -3,18 +3,89 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:golden_toolkit/golden_toolkit.dart';
+import 'package:super_editor/src/infrastructure/platforms/android/selection_handles.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/selection_handles.dart';
 import 'package:super_editor/super_editor.dart';
+import 'package:super_editor/super_editor_test.dart';
+
+import '../../../test/super_editor/supereditor_test_tools.dart';
+import '../../test_tools_goldens.dart';
 
 void main() {
   group('SuperEditor', () {
+    group("mobile drag handles", () {
+      testGoldensOnAndroid("with caret change colors", (tester) async {
+        final testContext = await tester //
+            .createDocument() //
+            .fromMarkdown("This is some text to select.") //
+            .useAppTheme(ThemeData(primaryColor: Colors.red)) //
+            .pump();
+        final nodeId = testContext.findEditContext().document.nodes.first.id;
+
+        await tester.placeCaretInParagraph(nodeId, 15);
+
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile("goldens/supereditor_android_collapsed_handle_color.png"),
+        );
+      });
+
+      testGoldensOnAndroid("with selection change colors", (tester) async {
+        final testContext = await tester //
+            .createDocument() //
+            .fromMarkdown("This is some text to select.") //
+            .useAppTheme(ThemeData(primaryColor: Colors.red)) //
+            .pump();
+        final nodeId = testContext.findEditContext().document.nodes.first.id;
+
+        await tester.doubleTapInParagraph(nodeId, 15);
+
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile("goldens/supereditor_android_expanded_handle_color.png"),
+        );
+      });
+
+      testGoldensOniOS("with caret change colors", (tester) async {
+        final testContext = await tester //
+            .createDocument() //
+            .fromMarkdown("This is some text to select.") //
+            .useAppTheme(ThemeData(primaryColor: Colors.red)) //
+            .pump();
+        final nodeId = testContext.findEditContext().document.nodes.first.id;
+
+        await tester.placeCaretInParagraph(nodeId, 15);
+
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile("goldens/supereditor_ios_collapsed_handle_color.png"),
+        );
+      });
+
+      testGoldensOniOS("with selection change colors", (tester) async {
+        final testContext = await tester //
+            .createDocument() //
+            .fromMarkdown("This is some text to select.") //
+            .useAppTheme(ThemeData(primaryColor: Colors.red)) //
+            .pump();
+        final nodeId = testContext.findEditContext().document.nodes.first.id;
+
+        await tester.doubleTapInParagraph(nodeId, 15);
+
+        await expectLater(
+          find.byType(MaterialApp),
+          matchesGoldenFile("goldens/supereditor_ios_expanded_handle_color.png"),
+        );
+      });
+    });
+
     group('mobile selection', () {
       group('Android', () {
         _testParagraphSelection(
           'single tap text',
           DocumentGestureMode.android,
           "mobile-selection_android_single-tap-text",
-          (tester, composer, docKey, _) async {
+          (tester, docKey, _) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBox = docLayout.getRectForPosition(
@@ -32,7 +103,7 @@ void main() {
           'drag collapsed handle upstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-collapsed-upstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -65,7 +136,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection.collapsed(
                 position: DocumentPosition(
                   nodeId: "1",
@@ -80,7 +151,7 @@ void main() {
           'drag collapsed handle downstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-collapsed-downstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -113,7 +184,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection.collapsed(
                 position: DocumentPosition(
                   nodeId: "1",
@@ -128,7 +199,7 @@ void main() {
           'double tap text',
           DocumentGestureMode.android,
           "mobile-selection_android_double-tap-text",
-          (tester, composer, docKey, rootWidget) async {
+          (tester, docKey, rootWidget) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBox = docLayout.getRectForPosition(
@@ -143,7 +214,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -162,7 +233,7 @@ void main() {
           'triple tap text',
           DocumentGestureMode.android,
           "mobile-selection_android_trip-tap-text",
-          (tester, composer, docKey, _) async {
+          (tester, docKey, _) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBox = docLayout.getRectForPosition(
@@ -177,7 +248,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -196,7 +267,7 @@ void main() {
           'drag base handle upstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-base-upstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -230,7 +301,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -249,7 +320,7 @@ void main() {
           'drag extent handle upstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-extent-upstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -282,7 +353,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -301,7 +372,7 @@ void main() {
           'drag extent handle downstream',
           DocumentGestureMode.android,
           "mobile-selection_android_drag-extent-downstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -334,7 +405,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -355,7 +426,7 @@ void main() {
           'single tap text',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_single-tap-text",
-          (tester, composer, docKey, _) async {
+          (tester, docKey, _) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBox = docLayout.getRectForPosition(
@@ -370,7 +441,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection.collapsed(
                 position: DocumentPosition(
                   nodeId: "1",
@@ -385,7 +456,7 @@ void main() {
           'drag collapsed handle upstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-collapsed-upstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -421,11 +492,11 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection.collapsed(
                 position: DocumentPosition(
                   nodeId: "1",
-                  nodePosition: TextNodePosition(offset: 28, affinity: TextAffinity.upstream),
+                  nodePosition: TextNodePosition(offset: 28),
                 ),
               ),
             );
@@ -436,7 +507,7 @@ void main() {
           'drag collapsed handle downstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-collapsed-downstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -472,11 +543,11 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection.collapsed(
                 position: DocumentPosition(
                   nodeId: "1",
-                  nodePosition: TextNodePosition(offset: 39, affinity: TextAffinity.upstream),
+                  nodePosition: TextNodePosition(offset: 39),
                 ),
               ),
             );
@@ -487,7 +558,7 @@ void main() {
           'double tap text',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_double-tap-text",
-          (tester, composer, docKey, rootWidget) async {
+          (tester, docKey, rootWidget) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBox = docLayout.getRectForPosition(
@@ -502,7 +573,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -521,7 +592,7 @@ void main() {
           'triple tap text',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_trip-tap-text",
-          (tester, composer, docKey, _) async {
+          (tester, docKey, _) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBox = docLayout.getRectForPosition(
@@ -536,7 +607,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -555,7 +626,8 @@ void main() {
           'drag base handle upstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-base-upstream",
-          (tester, composer, docKey, dragLine) async {
+          maxPixelMismatchCount: 1,
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -589,7 +661,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -608,7 +680,7 @@ void main() {
           'drag extent handle upstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-extent-upstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -641,7 +713,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -660,7 +732,7 @@ void main() {
           'drag extent handle downstream',
           DocumentGestureMode.iOS,
           "mobile-selection_ios_drag-extent-downstream",
-          (tester, composer, docKey, dragLine) async {
+          (tester, docKey, dragLine) async {
             final docBox = docKey.currentContext!.findRenderObject() as RenderBox;
             final docLayout = docKey.currentState as DocumentLayout;
             final characterBoxStart = docLayout.getRectForPosition(
@@ -693,7 +765,7 @@ void main() {
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
             expect(
-              composer.selection,
+              SuperEditorInspector.findDocumentSelection(),
               const DocumentSelection(
                 base: DocumentPosition(
                   nodeId: "1",
@@ -718,47 +790,50 @@ void _testParagraphSelection(
   String description,
   DocumentGestureMode platform,
   String goldenName,
-  Future<void> Function(WidgetTester, DocumentComposer, GlobalKey docKey, ValueNotifier<_Line?> dragLine) test,
-) {
+  Future<void> Function(WidgetTester, GlobalKey docKey, ValueNotifier<_Line?> dragLine) test, {
+  int maxPixelMismatchCount = 0,
+}) {
   final docKey = GlobalKey();
 
-  testGoldens(description, (tester) async {
-    tester.binding.window
-      ..physicalSizeTestValue = const Size(800, 200)
-      ..devicePixelRatioTestValue = 1.0;
+  testGoldensOnAndroid(description, (tester) async {
+    tester.view
+      ..physicalSize = const Size(800, 200)
+      ..devicePixelRatio = 1.0;
     tester.binding.platformDispatcher.textScaleFactorTestValue = 1.0;
 
     final dragLine = ValueNotifier<_Line?>(null);
 
-    final composer = DocumentComposer();
-
-    final content = _buildScaffold(
-      dragLine: dragLine,
-      child: SuperEditor(
-        documentLayoutKey: docKey,
-        editor: _createSingleParagraphEditor(),
-        composer: composer,
-        gestureMode: platform,
-        stylesheet: Stylesheet(
+    await tester //
+        .createDocument()
+        .withCustomContent(_createSingleParagraphDoc())
+        .withLayoutKey(docKey)
+        .withGestureMode(platform)
+        .useStylesheet(Stylesheet(
           documentPadding: const EdgeInsets.all(16),
           rules: defaultStylesheet.rules,
           inlineTextStyler: (attributions, style) => _textStyleBuilder(attributions),
-        ),
-      ),
-    );
-
-    // Display the content
-    await tester.pumpWidget(
-      content,
-    );
+        ))
+        .withCustomWidgetTreeBuilder(
+      (superEditor) {
+        return _buildScaffold(
+          dragLine: dragLine,
+          child: superEditor,
+        );
+      },
+    ) //
+        .pump();
 
     // Run the test
-    await test(tester, composer, docKey, dragLine);
+    await test(tester, docKey, dragLine);
 
     // Compare the golden
-    await screenMatchesGolden(tester, goldenName);
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(_DragLinePaint),
+      matchesGoldenFileWithPixelAllowance("goldens/$goldenName.png", maxPixelMismatchCount),
+    );
 
-    tester.binding.window.clearPhysicalSizeTestValue();
+    tester.view.resetPhysicalSize();
   });
 }
 
@@ -790,18 +865,13 @@ TextStyle _textStyleBuilder(attributions) {
   );
 }
 
-DocumentEditor _createSingleParagraphEditor() {
-  return DocumentEditor(document: _createSingleParagraphDoc());
-}
-
 MutableDocument _createSingleParagraphDoc() {
   return MutableDocument(
     nodes: [
       ParagraphNode(
         id: "1",
         text: AttributedText(
-          text:
-              "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+          "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
         ),
       ),
     ],

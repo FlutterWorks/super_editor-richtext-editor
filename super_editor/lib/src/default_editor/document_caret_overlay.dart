@@ -1,17 +1,24 @@
-import 'package:flutter/widgets.dart';
-import 'package:super_editor/src/core/document.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:super_editor/src/core/document_composer.dart';
 import 'package:super_editor/src/core/document_layout.dart';
+import 'package:super_editor/src/infrastructure/content_layers.dart';
 import 'package:super_text_layout/super_text_layout.dart';
 
 /// Document overlay that paints a caret with the given [caretStyle].
-class CaretDocumentOverlay extends StatefulWidget {
+class CaretDocumentOverlay extends ContentLayerStatefulWidget {
   const CaretDocumentOverlay({
     Key? key,
     required this.composer,
     required this.documentLayoutResolver,
-    required this.caretStyle,
-    required this.document,
+    this.caretStyle = const CaretStyle(
+      width: 2,
+      color: Colors.black,
+    ),
+    this.platformOverride,
+    this.displayOnAllPlatforms = false,
+    this.blinkTimingMode = BlinkTimingMode.ticker,
   }) : super(key: key);
 
   /// The editor's [DocumentComposer], which reports the current selection.
@@ -21,144 +28,159 @@ class CaretDocumentOverlay extends StatefulWidget {
   /// that the current selection can be mapped to an (x,y) offset and a height.
   final DocumentLayout Function() documentLayoutResolver;
 
-  /// The editor's [Document].
-  ///
-  /// Some operations that affect caret position don't trigger a selection change, e.g.,
-  /// indenting a list item.
-  ///
-  /// We need to listen to all document changes to update the caret position when these
-  /// operations happen.
-  final Document document;
-
   /// The visual style of the caret that this overlay paints.
   final CaretStyle caretStyle;
 
+  /// The platform to use to determine caret behavior, defaults to [defaultTargetPlatform].
+  final TargetPlatform? platformOverride;
+
+  /// Whether to display a caret on all platforms, including mobile.
+  ///
+  /// By default, the caret is only displayed on desktop.
+  final bool displayOnAllPlatforms;
+
+  /// The timing mechanism used to blink, e.g., `Ticker` or `Timer`.
+  ///
+  /// `Timer`s are not expected to work in tests.
+  final BlinkTimingMode blinkTimingMode;
+
   @override
-  State<CaretDocumentOverlay> createState() => _CaretDocumentOverlayState();
+  ContentLayerState<CaretDocumentOverlay, Rect?> createState() => _CaretDocumentOverlayState();
 }
 
-class _CaretDocumentOverlayState extends State<CaretDocumentOverlay> with SingleTickerProviderStateMixin {
-  final _caret = ValueNotifier<Rect?>(null);
+class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay, Rect?>
+    with SingleTickerProviderStateMixin {
   late final BlinkController _blinkController;
-  BoxConstraints? _previousConstraints;
 
   @override
   void initState() {
     super.initState();
-    widget.composer.selectionNotifier.addListener(_scheduleCaretUpdate);
-    widget.document.addListener(_scheduleCaretUpdate);
-    _blinkController = BlinkController(tickerProvider: this)..startBlinking();
 
-    // If we already have a selection, we need to display the caret.
-    if (widget.composer.selection != null) {
-      _scheduleCaretUpdate();
+    switch (widget.blinkTimingMode) {
+      case BlinkTimingMode.ticker:
+        _blinkController = BlinkController(tickerProvider: this);
+      case BlinkTimingMode.timer:
+        _blinkController = BlinkController.withTimer();
     }
+
+    widget.composer.selectionNotifier.addListener(_onSelectionChange);
+
+    _startOrStopBlinking();
   }
 
   @override
   void didUpdateWidget(CaretDocumentOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (widget.document != oldWidget.document) {
-      oldWidget.document.removeListener(_scheduleCaretUpdate);
-      widget.document.addListener(_scheduleCaretUpdate);
-    }
-
     if (widget.composer != oldWidget.composer) {
-      oldWidget.composer.selectionNotifier.removeListener(_scheduleCaretUpdate);
-      widget.composer.selectionNotifier.addListener(_scheduleCaretUpdate);
+      oldWidget.composer.selectionNotifier.removeListener(_onSelectionChange);
+      widget.composer.selectionNotifier.addListener(_onSelectionChange);
 
-      // Selection has changed, we need to update the caret.
-      if (widget.composer.selection != oldWidget.composer.selection) {
-        _scheduleCaretUpdate();
-      }
+      _startOrStopBlinking();
     }
   }
 
   @override
   void dispose() {
-    widget.composer.selectionNotifier.removeListener(_scheduleCaretUpdate);
-    widget.document.removeListener(_scheduleCaretUpdate);
+    widget.composer.selectionNotifier.removeListener(_onSelectionChange);
+
     _blinkController.dispose();
+
     super.dispose();
   }
 
-  /// Schedules a caret update after the current frame.
-  void _scheduleCaretUpdate() {
-    // Give the document a frame to update its layout before we lookup
-    // the extent offset.
-    WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-      _updateCaretOffset();
-    });
+  void _onSelectionChange() {
+    _updateCaretFlash();
+
+    if (SchedulerBinding.instance.schedulerPhase != SchedulerPhase.persistentCallbacks) {
+      // The Flutter pipeline isn't running. Schedule a re-build and re-position the caret.
+      setState(() {
+        // The caret is positioned in the build() call.
+      });
+    }
   }
 
-  void _updateCaretOffset() {
-    if (!mounted) {
+  void _startOrStopBlinking() {
+    if (widget.composer.selection == null && !_blinkController.isBlinking) {
       return;
     }
 
+    if (widget.composer.selection != null && _blinkController.isBlinking) {
+      return;
+    }
+
+    widget.composer.selection != null //
+        ? _blinkController.startBlinking()
+        : _blinkController.stopBlinking();
+  }
+
+  void _updateCaretFlash() {
     final documentSelection = widget.composer.selection;
     if (documentSelection == null) {
-      _caret.value = null;
       _blinkController.stopBlinking();
       return;
     }
 
     _blinkController.startBlinking();
     _blinkController.jumpToOpaque();
-
-    final documentLayout = widget.documentLayoutResolver();
-    _caret.value = documentLayout.getRectForPosition(documentSelection.extent)!;
   }
 
   @override
-  Widget build(BuildContext context) {
-    // IgnorePointer so that when the user double and triple taps, the
-    // caret doesn't intercept those later taps.
-    return IgnorePointer(
-      child: ValueListenableBuilder<Rect?>(
-        valueListenable: _caret,
-        builder: (context, caret, child) {
-          // We use a LayoutBuilder because the appropriate offset for the caret
-          // is based on the flow of content, which is based on the document's
-          // size/constraints. We need to re-calculate the caret offset when the
-          // constraints change.
-          return LayoutBuilder(builder: (context, constraints) {
-            if (_previousConstraints != null && constraints != _previousConstraints) {
-              // Use a post-frame callback to avoid calling setState() during build.
-              WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-                _updateCaretOffset();
-              });
-            }
-            _previousConstraints = constraints;
+  Rect? computeLayoutData(RenderObject? contentLayout) {
+    final documentSelection = widget.composer.selection;
+    if (documentSelection == null) {
+      return null;
+    }
 
-            return RepaintBoundary(
-              child: Stack(
-                children: [
-                  if (caret != null)
-                    Positioned(
-                      top: caret.top,
-                      left: caret.left,
-                      height: caret.height,
-                      child: AnimatedBuilder(
-                        animation: _blinkController,
-                        builder: (context, child) {
-                          return Container(
-                            key: primaryCaretKey,
-                            width: widget.caretStyle.width,
-                            decoration: BoxDecoration(
-                              color: widget.caretStyle.color.withOpacity(_blinkController.opacity),
-                              borderRadius: widget.caretStyle.borderRadius,
-                            ),
-                          );
-                        },
+    final documentLayout = widget.documentLayoutResolver();
+    final selectedComponent = documentLayout.getComponentByNodeId(widget.composer.selection!.extent.nodeId);
+    if (selectedComponent == null) {
+      // Assume that we're in a momentary transitive state where the document layout
+      // just gained or lost a component. We expect this method ot run again in a moment
+      // to correct for this.
+      return null;
+    }
+
+    return documentLayout.getRectForPosition(documentSelection.extent)!;
+  }
+
+  @override
+  Widget doBuild(BuildContext context, Rect? caret) {
+    // By default, don't show a caret on mobile because SuperEditor displays
+    // mobile carets and handles elsewhere. This can be overridden by settings
+    // `displayOnAllPlatforms` to true.
+    final platform = widget.platformOverride ?? defaultTargetPlatform;
+    if (!widget.displayOnAllPlatforms && (platform == TargetPlatform.android || platform == TargetPlatform.iOS)) {
+      return const SizedBox();
+    }
+
+    // Use a RepaintBoundary so that caret flashing doesn't invalidate our
+    // ancestor painting.
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: Stack(
+          children: [
+            if (caret != null)
+              Positioned(
+                top: caret.top,
+                left: caret.left,
+                height: caret.height,
+                child: AnimatedBuilder(
+                  animation: _blinkController,
+                  builder: (context, child) {
+                    return Container(
+                      key: primaryCaretKey,
+                      width: widget.caretStyle.width,
+                      decoration: BoxDecoration(
+                        color: widget.caretStyle.color.withOpacity(_blinkController.opacity),
+                        borderRadius: widget.caretStyle.borderRadius,
                       ),
-                    ),
-                ],
+                    );
+                  },
+                ),
               ),
-            );
-          });
-        },
+          ],
+        ),
       ),
     );
   }

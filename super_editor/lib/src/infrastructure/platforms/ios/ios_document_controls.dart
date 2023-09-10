@@ -1,10 +1,13 @@
-import 'package:flutter/material.dart' hide ListenableBuilder;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:follow_the_leader/follow_the_leader.dart';
 import 'package:super_editor/src/core/document.dart';
+import 'package:super_editor/src/core/document_composer.dart';
 import 'package:super_editor/src/core/document_layout.dart';
 import 'package:super_editor/src/core/document_selection.dart';
 import 'package:super_editor/src/default_editor/text.dart';
-import 'package:super_editor/src/infrastructure/_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
 import 'package:super_editor/src/infrastructure/platforms/ios/selection_handles.dart';
 import 'package:super_editor/src/infrastructure/platforms/mobile_documents.dart';
 import 'package:super_editor/src/infrastructure/toolbar_position_delegate.dart';
@@ -21,6 +24,7 @@ class IosDocumentTouchEditingControls extends StatefulWidget {
     required this.documentLayout,
     required this.document,
     required this.selection,
+    required this.changeSelection,
     required this.handleColor,
     this.onDoubleTapOnCaret,
     this.onTripleTapOnCaret,
@@ -38,7 +42,9 @@ class IosDocumentTouchEditingControls extends StatefulWidget {
 
   final Document document;
 
-  final ValueNotifier<DocumentSelection?> selection;
+  final ValueListenable<DocumentSelection?> selection;
+
+  final void Function(DocumentSelection?, SelectionChangeType, String selectionReason) changeSelection;
 
   final FloatingCursorController floatingCursorController;
 
@@ -82,7 +88,7 @@ class IosDocumentTouchEditingControls extends StatefulWidget {
   /// selected text.
   ///
   /// Typically, this bar includes actions like "copy", "cut", "paste", etc.
-  final Widget Function(BuildContext) popoverToolbarBuilder;
+  final WidgetBuilder popoverToolbarBuilder;
 
   /// Disables all gesture interaction for these editing controls,
   /// allowing gestures to pass through these controls to whatever
@@ -100,6 +106,15 @@ class IosDocumentTouchEditingControls extends StatefulWidget {
 
 class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditingControls>
     with SingleTickerProviderStateMixin {
+  /// The maximum horizontal distance from the bounds of selectable text, for which we want to render
+  /// the floating cursor.
+  ///
+  /// Beyond this distance, no floating cursor is rendered.
+  static const _maximumDistanceToBeNearText = 30.0;
+
+  static const _defaultFloatingCursorHeight = 20.0;
+  static const _defaultFloatingCursorWidth = 2.0;
+
   // These global keys are assigned to each draggable handle to
   // prevent a strange dragging issue.
   //
@@ -120,8 +135,8 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
   late BlinkController _caretBlinkController;
   Offset? _prevCaretOffset;
 
-  static const _defaultFloatingCursorHeight = 20.0;
   final _isShowingFloatingCursor = ValueNotifier<bool>(false);
+  final _isFloatingCursorOverOrNearText = ValueNotifier<bool>(false);
   final _floatingCursorKey = GlobalKey();
   Offset? _initialFloatingCursorOffset;
   final _floatingCursorOffset = ValueNotifier<Offset?>(null);
@@ -177,6 +192,7 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
 
         _caretBlinkController.startBlinking();
 
+        _isFloatingCursorOverOrNearText.value = false;
         _initialFloatingCursorOffset = null;
         _floatingCursorOffset.value = null;
         _floatingCursorHeight = _defaultFloatingCursorHeight;
@@ -195,15 +211,18 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
     if (!widget.selection.value!.isCollapsed) {
       // The selection is expanded. First we need to collapse it, then
       // we can start showing the floating cursor.
-      widget.selection.value = widget.selection.value!.collapseDownstream(widget.document);
-      WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-        _onFloatingCursorChange();
-      });
+      widget.changeSelection(
+        widget.selection.value!.collapseDownstream(widget.document),
+        SelectionChangeType.expandSelection,
+        SelectionReason.userInteraction,
+      );
+      onNextFrame((_) => _onFloatingCursorChange());
     }
 
     if (_floatingCursorOffset.value == null) {
       // The floating cursor just started.
       widget.onFloatingCursorStart?.call();
+      _isShowingFloatingCursor.value = true;
     }
 
     _caretBlinkController.stopBlinking();
@@ -216,11 +235,15 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
 
     final nearestDocPosition = widget.documentLayout.getDocumentPositionNearestToOffset(_floatingCursorOffset.value!)!;
     if (nearestDocPosition.nodePosition is TextNodePosition) {
-      final nearestComponent = widget.documentLayout.getComponentByNodeId(nearestDocPosition.nodeId)!;
-      _floatingCursorHeight = nearestComponent.getRectForPosition(nearestDocPosition.nodePosition).height;
+      final nearestPositionRect = widget.documentLayout.getRectForPosition(nearestDocPosition)!;
+      _floatingCursorHeight = nearestPositionRect.height;
+
+      final distance = _floatingCursorOffset.value! - nearestPositionRect.topLeft + const Offset(1.0, 0.0);
+      _isFloatingCursorOverOrNearText.value = distance.dx.abs() <= _maximumDistanceToBeNearText;
     } else {
       final nearestComponent = widget.documentLayout.getComponentByNodeId(nearestDocPosition.nodeId)!;
       _floatingCursorHeight = (nearestComponent.context.findRenderObject() as RenderBox).size.height;
+      _isFloatingCursorOverOrNearText.value = false;
     }
 
     widget.onFloatingCursorMoved?.call(_floatingCursorOffset.value!);
@@ -247,7 +270,7 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
                 child: Stack(
                   children: [
                     // Build caret or drag handles
-                    ..._buildHandles(),
+                    _buildHandles(),
                     // Build the floating cursor
                     _buildFloatingCursor(),
                     // Build the editing toolbar
@@ -273,20 +296,41 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
         });
   }
 
-  List<Widget> _buildHandles() {
-    if (!widget.editingController.shouldDisplayCollapsedHandle &&
-        !widget.editingController.shouldDisplayExpandedHandles) {
-      editorGesturesLog.finer('Not building overlay handles because they aren\'t desired');
-      return [];
-    }
+  Widget _buildHandles() {
+    // When the floating cursor is over text or near text,
+    // we don't show the drag handles.
+    //
+    // Every time the floating cursor moves to a position which
+    // changes this state or when it changes its visibility,
+    // this widget is rebuilt.
+    return ValueListenableBuilder<bool>(
+      valueListenable: _isFloatingCursorOverOrNearText,
+      builder: (context, isNearText, __) {
+        if (isNearText) {
+          return const SizedBox.shrink();
+        }
 
-    if (widget.editingController.shouldDisplayCollapsedHandle) {
-      return [
-        _buildCollapsedHandle(),
-      ];
-    } else {
-      return _buildExpandedHandles();
-    }
+        if (!widget.editingController.shouldDisplayCollapsedHandle &&
+            !widget.editingController.shouldDisplayExpandedHandles) {
+          editorGesturesLog.finer('Not building overlay handles because they aren\'t desired');
+          return const SizedBox.shrink();
+        }
+
+        late List<Widget> handles;
+
+        if (widget.editingController.shouldDisplayCollapsedHandle) {
+          handles = [
+            _buildCollapsedHandle(),
+          ];
+        } else {
+          handles = _buildExpandedHandles();
+        }
+
+        return Stack(
+          children: handles,
+        );
+      },
+    );
   }
 
   Widget _buildCollapsedHandle() {
@@ -321,11 +365,11 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
   }) {
     const ballDiameter = 8.0;
 
+    late LeaderLink handleLink;
     late Widget handle;
-    late Offset handleOffset;
     switch (handleType) {
       case HandleType.collapsed:
-        handleOffset = widget.editingController.caretTop! + const Offset(-1, 0);
+        handleLink = widget.editingController.selectionLinks.caretLink;
         handle = ValueListenableBuilder<bool>(
           valueListenable: _isShowingFloatingCursor,
           builder: (context, isShowingFloatingCursor, child) {
@@ -338,9 +382,7 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
         );
         break;
       case HandleType.upstream:
-        handleOffset = widget.editingController.upstreamHandleOffset! -
-            Offset(0, widget.editingController.upstreamCaretHeight!) +
-            const Offset(-ballDiameter / 2, -3 * ballDiameter / 4);
+        handleLink = widget.editingController.selectionLinks.upstreamLink;
         handle = IOSSelectionHandle.upstream(
           color: widget.handleColor,
           handleType: handleType,
@@ -349,9 +391,7 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
         );
         break;
       case HandleType.downstream:
-        handleOffset = widget.editingController.downstreamHandleOffset! -
-            Offset(0, widget.editingController.downstreamCaretHeight!) +
-            const Offset(-ballDiameter / 2, -3 * ballDiameter / 4);
+        handleLink = widget.editingController.selectionLinks.downstreamLink;
         handle = IOSSelectionHandle.upstream(
           color: widget.handleColor,
           handleType: handleType,
@@ -363,26 +403,28 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
 
     return _buildHandle(
       handleKey: handleKey,
-      handleOffset: handleOffset,
       handle: handle,
+      handleLink: handleLink,
       debugColor: debugColor,
     );
   }
 
   Widget _buildHandle({
     required Key handleKey,
-    required Offset handleOffset,
     required Widget handle,
+    required LeaderLink handleLink,
     required Color debugColor,
   }) {
-    return CompositedTransformFollower(
+    return Follower.withOffset(
       key: handleKey,
-      link: widget.editingController.documentLayoutLink,
-      offset: handleOffset + const Offset(-5, 0),
+      link: handleLink,
+      leaderAnchor: Alignment.center,
+      followerAnchor: Alignment.center,
+      showWhenUnlinked: false,
       child: IgnorePointer(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 5),
-          color: widget.showDebugPaint ? Colors.green : Colors.transparent,
+          color: widget.showDebugPaint ? debugColor : Colors.transparent,
           child: handle,
         ),
       ),
@@ -397,15 +439,21 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
           return const SizedBox();
         }
 
-        return _buildHandle(
-          handleKey: _floatingCursorKey,
-          handleOffset: floatingCursorOffset - Offset(0, _floatingCursorHeight / 2),
-          handle: Container(
-            width: 2,
-            height: _floatingCursorHeight,
-            color: Colors.red.withOpacity(0.75),
+        return CompositedTransformFollower(
+          key: _floatingCursorKey,
+          link: widget.editingController.documentLayoutLink,
+          offset: floatingCursorOffset - Offset(0, _floatingCursorHeight / 2) + const Offset(-5, 0),
+          child: IgnorePointer(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              color: widget.showDebugPaint ? Colors.blue : Colors.transparent,
+              child: Container(
+                width: _defaultFloatingCursorWidth,
+                height: _floatingCursorHeight,
+                color: Colors.red.withOpacity(0.75),
+              ),
+            ),
           ),
-          debugColor: Colors.blue,
         );
       },
     );
@@ -459,6 +507,7 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
         textFieldGlobalOffset: Offset.zero,
         desiredTopAnchorInTextField: widget.editingController.toolbarTopAnchor!,
         desiredBottomAnchorInTextField: widget.editingController.toolbarBottomAnchor!,
+        screenPadding: widget.editingController.screenPadding,
       ),
       child: IgnorePointer(
         ignoring: !widget.editingController.shouldDisplayToolbar,
@@ -477,12 +526,13 @@ class _IosDocumentTouchEditingControlsState extends State<IosDocumentTouchEditin
 /// Controls the display of drag handles, a magnifier, and a
 /// floating toolbar, assuming iOS-style behavior for the
 /// handles.
-class IosDocumentGestureEditingController extends MagnifierAndToolbarController {
+class IosDocumentGestureEditingController extends GestureEditingController {
   IosDocumentGestureEditingController({
     required LayerLink documentLayoutLink,
-    required LayerLink magnifierFocalPointLink,
-  })  : _documentLayoutLink = documentLayoutLink,
-        super(magnifierFocalPointLink: magnifierFocalPointLink);
+    required super.selectionLinks,
+    required super.magnifierFocalPointLink,
+    required super.overlayController,
+  }) : _documentLayoutLink = documentLayoutLink;
 
   /// Layer link that's aligned to the top-left corner of the document layout.
   ///

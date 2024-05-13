@@ -428,6 +428,42 @@ void main() {
             .getAttributedRange({ExpectedSpans.bold, ExpectedSpans.italics, ExpectedSpans.strikethrough}, 2);
         expect(range, const SpanRange(1, 3));
       });
+
+      group('getAllAttributionsThroughout', () {
+        test('returns empty list if the range does not have any attributions', () {
+          final attributedText = AttributedText('Text without attributions');
+          expect(attributedText.getAllAttributionsThroughout(const SpanRange(5, 12)), isEmpty);
+        });
+
+        test('returns attributions that apply to the entirety of the range', () {
+          // Create a text with the following attributions:
+          // - bold: applied throught the entire text.
+          // - underline: applied to the word "with",
+          // - italics: applied from the begining of the text until "wi|th".
+          // - strikethrough: applied from "wi|th" until the end of the text.
+
+          final attributedText = AttributedText(
+            'Text with attributions',
+            AttributedSpans(
+              attributions: const [
+                SpanMarker(attribution: ExpectedSpans.bold, offset: 0, markerType: SpanMarkerType.start),
+                SpanMarker(attribution: ExpectedSpans.italics, offset: 0, markerType: SpanMarkerType.start),
+                SpanMarker(attribution: ExpectedSpans.underline, offset: 5, markerType: SpanMarkerType.start),
+                SpanMarker(attribution: ExpectedSpans.italics, offset: 6, markerType: SpanMarkerType.end),
+                SpanMarker(attribution: ExpectedSpans.strikethrough, offset: 6, markerType: SpanMarkerType.start),
+                SpanMarker(attribution: ExpectedSpans.underline, offset: 8, markerType: SpanMarkerType.end),
+                SpanMarker(attribution: ExpectedSpans.strikethrough, offset: 21, markerType: SpanMarkerType.end),
+                SpanMarker(attribution: ExpectedSpans.bold, offset: 21, markerType: SpanMarkerType.end),
+              ],
+            ),
+          );
+
+          expect(
+            attributedText.getAllAttributionsThroughout(const SpanRange(5, 8)),
+            {ExpectedSpans.bold, ExpectedSpans.underline},
+          );
+        });
+      });
     });
 
     group("attribution visitation", () {
@@ -679,6 +715,188 @@ void main() {
         );
 
         expect(expectedVisits, isEmpty);
+      });
+    });
+
+    group('collapseSpans', () {
+      const boldAttribution = NamedAttribution('bold');
+
+      test('returns a single span for text without attributions', () {
+        final text = AttributedText('Hello World');
+
+        final spans = text.computeAttributionSpans().toList();
+
+        // Ensure a single span containing the whole text was returned.
+        expect(spans.length, 1);
+        expect(spans[0].attributions, isEmpty);
+        expect(spans[0].start, 0);
+        expect(spans[0].end, text.length - 1);
+      });
+
+      test('returns a single span for text with an attribution containing the whole text', () {
+        final text = AttributedText(
+          'Hello World',
+          AttributedSpans(
+            attributions: const [
+              SpanMarker(
+                attribution: boldAttribution,
+                markerType: SpanMarkerType.start,
+                offset: 0,
+              ),
+              SpanMarker(
+                attribution: boldAttribution,
+                markerType: SpanMarkerType.end,
+                offset: 10,
+              ),
+            ],
+          ),
+        );
+
+        final spans = text.computeAttributionSpans().toList();
+
+        // Ensure a single span containing the whole text was returned.
+        expect(spans.length, 1);
+        expect(spans[0].attributions, isNotEmpty);
+        expect(spans[0].start, 0);
+        expect(spans[0].end, text.length - 1);
+      });
+
+      test('returns two spans for text with an attribution from the beginning until half of the text', () {
+        // Create a text with a bold attribution in "Hello ".
+        final text = AttributedText(
+          'Hello World',
+          AttributedSpans(
+            attributions: const [
+              SpanMarker(
+                attribution: boldAttribution,
+                markerType: SpanMarkerType.start,
+                offset: 0,
+              ),
+              SpanMarker(
+                attribution: boldAttribution,
+                markerType: SpanMarkerType.end,
+                offset: 5,
+              ),
+            ],
+          ),
+        );
+
+        final spans = text.computeAttributionSpans().toList();
+
+        // Ensure two spans were returned.
+        // The first containing the attribution and the second without any attributions.
+        expect(spans.length, 2);
+        expect(spans[0].attributions, isNotEmpty);
+        expect(spans[0].start, 0);
+        expect(spans[0].end, 5);
+        expect(spans[1].attributions, isEmpty);
+        expect(spans[1].start, 6);
+        expect(spans[1].end, text.length - 1);
+      });
+
+      test('handles markers which end after the end of the text', () {
+        // Create a text with a bold attribution in "World".
+        // The marker end offset is bigger than the last character index (the text lenght is 11).
+        final text = AttributedText(
+          'Hello World',
+          AttributedSpans(
+            attributions: const [
+              SpanMarker(
+                attribution: boldAttribution,
+                markerType: SpanMarkerType.start,
+                offset: 6,
+              ),
+              SpanMarker(
+                attribution: boldAttribution,
+                markerType: SpanMarkerType.end,
+                offset: 11,
+              ),
+            ],
+          ),
+        );
+
+        final spans = text.computeAttributionSpans().toList();
+
+        // Ensure two spans were returned. The first containing no attributions and
+        // the second containing the attribution.
+        expect(spans.length, 2);
+        expect(spans[0].attributions, isEmpty);
+        expect(spans[0].start, 0);
+        expect(spans[0].end, 5);
+        expect(spans[1].attributions, isNotEmpty);
+        expect(spans[1].start, 6);
+        expect(spans[1].end, 10);
+      });
+    });
+
+    group("copy >", () {
+      test("copies an AttributedText without any attributions", () {
+        final attributedText = AttributedText(
+          'Sample Text',
+        );
+
+        expect(attributedText.copy(), AttributedText('Sample Text'));
+      });
+
+      test("copies an AttributedText with attributions", () {
+        final attributedText = AttributedText(
+          'abcdefghij',
+          AttributedSpans(
+            attributions: [
+              const SpanMarker(
+                attribution: ExpectedSpans.bold,
+                offset: 2,
+                markerType: SpanMarkerType.start,
+              ),
+              const SpanMarker(
+                attribution: ExpectedSpans.italics,
+                offset: 4,
+                markerType: SpanMarkerType.start,
+              ),
+              const SpanMarker(
+                attribution: ExpectedSpans.bold,
+                offset: 5,
+                markerType: SpanMarkerType.end,
+              ),
+              const SpanMarker(
+                attribution: ExpectedSpans.italics,
+                offset: 7,
+                markerType: SpanMarkerType.end,
+              ),
+            ],
+          ),
+        );
+
+        expect(
+          attributedText.copy(),
+          AttributedText(
+            'abcdefghij',
+            AttributedSpans(
+              attributions: [
+                const SpanMarker(
+                  attribution: ExpectedSpans.bold,
+                  offset: 2,
+                  markerType: SpanMarkerType.start,
+                ),
+                const SpanMarker(
+                  attribution: ExpectedSpans.italics,
+                  offset: 4,
+                  markerType: SpanMarkerType.start,
+                ),
+                const SpanMarker(
+                  attribution: ExpectedSpans.bold,
+                  offset: 5,
+                  markerType: SpanMarkerType.end,
+                ),
+                const SpanMarker(
+                  attribution: ExpectedSpans.italics,
+                  offset: 7,
+                  markerType: SpanMarkerType.end,
+                ),
+              ],
+            ),
+          ),
+        );
       });
     });
   });

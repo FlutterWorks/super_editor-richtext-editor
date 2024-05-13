@@ -51,7 +51,7 @@ class ColorAttribution implements Attribution {
   const ColorAttribution(this.color);
 
   @override
-  String get id => "${color.value}";
+  String get id => 'color';
 
   final Color color;
 
@@ -74,6 +74,72 @@ class ColorAttribution implements Attribution {
 }
 
 /// Attribution to be used within [AttributedText] to
+/// represent an inline span of a backgrounnd color change.
+///
+/// Every [BackgroundColorAttribution] is considered equivalent so
+/// that [AttributedText] prevents multiple [BackgroundColorAttribution]s
+/// from overlapping.
+class BackgroundColorAttribution implements Attribution {
+  const BackgroundColorAttribution(this.color);
+
+  @override
+  String get id => 'background_color';
+
+  final Color color;
+
+  @override
+  bool canMergeWith(Attribution other) {
+    return this == other;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BackgroundColorAttribution && runtimeType == other.runtimeType && color == other.color;
+
+  @override
+  int get hashCode => color.hashCode;
+
+  @override
+  String toString() {
+    return '[BackgroundColorAttribution]: $color';
+  }
+}
+
+/// Attribution to be used within [AttributedText] to
+/// represent an inline span of a font size change.
+///
+/// Every [FontSizeAttribution] is considered equivalent so
+/// that [AttributedText] prevents multiple [FontSizeAttribution]s
+/// from overlapping.
+class FontSizeAttribution implements Attribution {
+  const FontSizeAttribution(this.fontSize);
+
+  @override
+  String get id => 'font_size';
+
+  final double fontSize;
+
+  @override
+  bool canMergeWith(Attribution other) {
+    return this == other;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FontSizeAttribution && runtimeType == other.runtimeType && fontSize == other.fontSize;
+
+  @override
+  int get hashCode => fontSize.hashCode;
+
+  @override
+  String toString() {
+    return '[FontSizeAttribution]: $fontSize';
+  }
+}
+
+/// Attribution to be used within [AttributedText] to
 /// represent a link.
 ///
 /// Every [LinkAttribution] is considered equivalent so
@@ -85,14 +151,29 @@ class ColorAttribution implements Attribution {
 /// within [AttributedText]. This class doesn't have a special
 /// relationship with [AttributedText].
 class LinkAttribution implements Attribution {
-  LinkAttribution({
-    required this.url,
-  });
+  factory LinkAttribution.fromUri(Uri uri) {
+    return LinkAttribution(uri.toString());
+  }
+
+  const LinkAttribution(this.url);
 
   @override
   String get id => 'link';
 
-  final Uri url;
+  /// The URL associated with the attributed text, as a `String`.
+  final String url;
+
+  /// Attempts to parse the [url] as a [Uri], and returns `true` if the [url]
+  /// is successfully parsed, or `false` if parsing fails, such as due to the [url]
+  /// including an invalid scheme, separator syntax, extra segments, etc.
+  bool get hasValidUri => Uri.tryParse(url) != null;
+
+  /// The URL associated with the attributed text, as a `Uri`.
+  ///
+  /// Accessing the [uri] throws an exception if the [url] isn't valid.
+  /// To access a URL that might not be valid, consider accessing the [url],
+  /// instead.
+  Uri get uri => Uri.parse(url);
 
   @override
   bool canMergeWith(Attribution other) {

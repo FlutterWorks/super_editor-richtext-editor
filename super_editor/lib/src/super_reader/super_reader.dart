@@ -1,6 +1,8 @@
 import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:follow_the_leader/follow_the_leader.dart';
 import 'package:super_editor/src/core/document.dart';
 import 'package:super_editor/src/core/document_debug_paint.dart';
 import 'package:super_editor/src/core/document_interaction.dart';
@@ -25,10 +27,15 @@ import 'package:super_editor/src/infrastructure/content_layers.dart';
 import 'package:super_editor/src/infrastructure/document_gestures_interaction_overrides.dart';
 import 'package:super_editor/src/infrastructure/documents/document_scaffold.dart';
 import 'package:super_editor/src/infrastructure/documents/document_scroller.dart';
+import 'package:super_editor/src/infrastructure/documents/document_selection.dart';
+import 'package:super_editor/src/infrastructure/documents/selection_leader_document_layer.dart';
 import 'package:super_editor/src/infrastructure/links.dart';
-import 'package:super_editor/src/infrastructure/selection_leader_document_layer.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/ios_document_controls.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/toolbar.dart';
+import 'package:super_editor/src/infrastructure/platforms/platform.dart';
 
 import '../infrastructure/platforms/mobile_documents.dart';
+import '../infrastructure/text_input.dart';
 import 'read_only_document_android_touch_interactor.dart';
 import 'read_only_document_ios_touch_interactor.dart';
 import 'read_only_document_keyboard_interactor.dart';
@@ -39,25 +46,28 @@ class SuperReader extends StatefulWidget {
   SuperReader({
     Key? key,
     this.focusNode,
+    this.autofocus = false,
+    this.tapRegionGroupId,
     required this.document,
     this.documentLayoutKey,
     this.selection,
+    this.selectionLayerLinks,
     this.scrollController,
     Stylesheet? stylesheet,
     this.customStylePhases = const [],
-    this.documentOverlayBuilders = const [],
+    this.documentUnderlayBuilders = const [],
+    this.documentOverlayBuilders = defaultSuperReaderDocumentOverlayBuilders,
     List<ComponentBuilder>? componentBuilders,
     List<ReadOnlyDocumentKeyboardAction>? keyboardActions,
     SelectionStyles? selectionStyle,
     this.gestureMode,
     this.contentTapDelegateFactory = superReaderLaunchLinkTapHandlerFactory,
+    this.overlayController,
     this.androidHandleColor,
     this.androidToolbarBuilder,
     this.iOSHandleColor,
     this.iOSToolbarBuilder,
     this.createOverlayControlsClipper,
-    this.autofocus = false,
-    this.overlayController,
     this.debugPaint = const DebugPaintConfig(),
   })  : stylesheet = stylesheet ?? readOnlyDefaultStylesheet,
         selectionStyles = selectionStyle ?? readOnlyDefaultSelectionStyle,
@@ -68,6 +78,19 @@ class SuperReader extends StatefulWidget {
         super(key: key);
 
   final FocusNode? focusNode;
+
+  /// Whether or not the [SuperReader] should autofocus.
+  final bool autofocus;
+
+  /// {@template super_reader_tap_region_group_id}
+  /// A group ID for a tap region that surrounds the reader
+  /// and also surrounds any related widgets, such as drag handles and a toolbar.
+  ///
+  /// When the reader is inside a [TapRegion], tapping at a drag handle causes
+  /// [TapRegion.onTapOutside] to be called. To prevent that, provide a
+  /// [tapRegionGroupId] with the same value as the ancestor [TapRegion] groupId.
+  /// {@endtemplate}
+  final String? tapRegionGroupId;
 
   /// The [Document] displayed in this [SuperReader], in read-only mode.
   final Document document;
@@ -81,15 +104,20 @@ class SuperReader extends StatefulWidget {
 
   final ValueNotifier<DocumentSelection?>? selection;
 
+  /// Leader links that connect leader widgets near the user's selection
+  /// to carets, handles, and other things that want to follow the selection.
+  ///
+  /// These links are always created and used within [SuperEditor]. By providing
+  /// an explicit [selectionLayerLinks], external widgets can also follow the
+  /// user's selection.
+  final SelectionLayerLinks? selectionLayerLinks;
+
   /// The [ScrollController] that governs this [SuperReader]'s scroll
   /// offset.
   ///
   /// [scrollController] is not used if this [SuperReader] has an ancestor
   /// [Scrollable].
   final ScrollController? scrollController;
-
-  /// Shows, hides, and positions a floating toolbar and magnifier.
-  final MagnifierAndToolbarController? overlayController;
 
   /// Style rules applied through the document presentation.
   final Stylesheet stylesheet;
@@ -115,9 +143,13 @@ class SuperReader extends StatefulWidget {
   /// knows how to interpret and apply table styles for your visual table component.
   final List<SingleColumnLayoutStylePhase> customStylePhases;
 
+  /// Layers that are displayed beneath the document layout, aligned
+  /// with the location and size of the document layout.
+  final List<SuperReaderDocumentLayerBuilder> documentUnderlayBuilders;
+
   /// Layers that are displayed on top of the document layout, aligned
   /// with the location and size of the document layout.
-  final List<ReadOnlyDocumentLayerBuilder> documentOverlayBuilders;
+  final List<SuperReaderDocumentLayerBuilder> documentOverlayBuilders;
 
   /// Priority list of widget factories that create instances of
   /// each visual component displayed in the document layout, e.g.,
@@ -142,6 +174,9 @@ class SuperReader extends StatefulWidget {
   /// when a user taps on a link.
   final SuperReaderContentTapDelegateFactory? contentTapDelegateFactory;
 
+  /// Shows, hides, and positions a floating toolbar and magnifier.
+  final MagnifierAndToolbarController? overlayController;
+
   /// Color of the text selection drag handles on Android.
   final Color? androidHandleColor;
 
@@ -149,9 +184,11 @@ class SuperReader extends StatefulWidget {
   final WidgetBuilder? androidToolbarBuilder;
 
   /// Color of the text selection drag handles on iOS.
+  @Deprecated("To configure handle color, surround SuperEditor with an IosEditorControlsScope, instead")
   final Color? iOSHandleColor;
 
   /// Builder that creates a floating toolbar when running on iOS.
+  @Deprecated("To configure a toolbar builder, surround SuperEditor with an IosEditorControlsScope, instead")
   final WidgetBuilder? iOSToolbarBuilder;
 
   /// Creates a clipper that applies to overlay controls, like drag
@@ -162,9 +199,6 @@ class SuperReader extends StatefulWidget {
   /// will be allowed to appear anywhere in the overlay in which they sit
   /// (probably the entire screen).
   final CustomClipper<Rect> Function(BuildContext overlayContext)? createOverlayControlsClipper;
-
-  /// Whether or not the [SuperReader] should autofocus.
-  final bool autofocus;
 
   /// Paints some extra visual ornamentation to help with
   /// debugging.
@@ -205,7 +239,13 @@ class SuperReaderState extends State<SuperReader> {
 
   // Leader links that connect leader widgets near the user's selection
   // to carets, handles, and other things that want to follow the selection.
-  final _selectionLinks = SelectionLayerLinks();
+  late SelectionLayerLinks _selectionLinks;
+
+  // GlobalKey for the iOS editor controls context so that the context data doesn't
+  // continuously replace itself every time we rebuild. We want to retain the same
+  // controls because they're shared throughout a number of disconnected widgets.
+  final _iosControlsContextKey = GlobalKey();
+  final _iosControlsController = SuperReaderIosControlsController();
 
   @override
   void initState() {
@@ -217,6 +257,8 @@ class SuperReaderState extends State<SuperReader> {
     _scroller = DocumentScroller();
     _scrollController = widget.scrollController ?? ScrollController();
     _autoScrollController = AutoScrollController();
+
+    _selectionLinks = widget.selectionLayerLinks ?? SelectionLayerLinks();
 
     _docLayoutKey = widget.documentLayoutKey ?? GlobalKey();
 
@@ -235,6 +277,10 @@ class SuperReaderState extends State<SuperReader> {
 
     if (widget.scrollController != oldWidget.scrollController) {
       _scrollController = widget.scrollController ?? ScrollController();
+    }
+
+    if (widget.selectionLayerLinks != oldWidget.selectionLayerLinks) {
+      _selectionLinks = widget.selectionLayerLinks ?? SelectionLayerLinks();
     }
 
     if (widget.document != oldWidget.document ||
@@ -266,7 +312,7 @@ class SuperReaderState extends State<SuperReader> {
       document: widget.document,
       getDocumentLayout: () => _docLayoutKey.currentState as DocumentLayout,
       selection: _selection,
-      scrollController: _autoScrollController,
+      scroller: _scroller,
     );
 
     _contentTapDelegate?.dispose();
@@ -288,6 +334,7 @@ class SuperReaderState extends State<SuperReader> {
       document: widget.document,
       selection: _selection,
       selectionStyles: widget.selectionStyles,
+      selectedTextColorStrategy: widget.stylesheet.selectedTextColorStrategy,
     );
 
     _docLayoutPresenter = SingleColumnLayoutPresenter(
@@ -331,104 +378,231 @@ class SuperReaderState extends State<SuperReader> {
 
   @override
   Widget build(BuildContext context) {
-    return ReadOnlyDocumentKeyboardInteractor(
-      // In a read-only document, we don't expect the software keyboard
-      // to ever be open. Therefore, we only respond to key presses, such
-      // as arrow keys.
-      focusNode: _focusNode,
-      readerContext: _readerContext,
-      keyboardActions: widget.keyboardActions,
-      autofocus: widget.autofocus,
-      child: DocumentScaffold(
-        documentLayoutLink: _documentLayoutLink,
-        documentLayoutKey: _docLayoutKey,
-        gestureBuilder: _buildGestureInteractor,
-        scrollController: _scrollController,
-        autoScrollController: _autoScrollController,
-        // TODO: Finish integrating the DocumentScroller in SuperReader (https://github.com/superlistapp/super_editor/issues/1306)
-        scroller: _scroller,
-        presenter: _docLayoutPresenter!,
-        componentBuilders: widget.componentBuilders,
-        underlays: [
-          // Layer that positions and sizes leader widgets at the bounds
-          // of the users selection so that carets, handles, toolbars, and
-          // other things can follow the selection.
-          (context) => _SelectionLeadersDocumentLayerBuilder(
-                links: _selectionLinks,
-              ).build(context, _readerContext),
-        ],
-        overlays: [
-          for (final overlayBuilder in widget.documentOverlayBuilders) //
-            (context) => overlayBuilder.build(context, _readerContext),
-        ],
-        debugPaint: widget.debugPaint,
-      ),
+    return _buildGestureControlsScope(
+      // We add a Builder immediately beneath the gesture controls scope so that
+      // all descendant widgets built within SuperReader can access that scope.
+      child: Builder(builder: (controlsScopeContext) {
+        return ReadOnlyDocumentKeyboardInteractor(
+          // In a read-only document, we don't expect the software keyboard
+          // to ever be open. Therefore, we only respond to key presses, such
+          // as arrow keys.
+          focusNode: _focusNode,
+          readerContext: _readerContext,
+          keyboardActions: widget.keyboardActions,
+          autofocus: widget.autofocus,
+          child: _buildPlatformSpecificViewportDecorations(
+            controlsScopeContext,
+            child: DocumentScaffold(
+              documentLayoutLink: _documentLayoutLink,
+              documentLayoutKey: _docLayoutKey,
+              gestureBuilder: _buildGestureInteractor,
+              scrollController: _scrollController,
+              autoScrollController: _autoScrollController,
+              scroller: _scroller,
+              presenter: _docLayoutPresenter!,
+              componentBuilders: widget.componentBuilders,
+              underlays: [
+                // Add any underlays that were provided by the client.
+                for (final underlayBuilder in widget.documentUnderlayBuilders) //
+                  (context) => underlayBuilder.build(context, _readerContext),
+              ],
+              overlays: [
+                // Layer that positions and sizes leader widgets at the bounds
+                // of the users selection so that carets, handles, toolbars, and
+                // other things can follow the selection.
+                (context) => _SelectionLeadersDocumentLayerBuilder(
+                      links: _selectionLinks,
+                    ).build(context, _readerContext),
+                // Add any overlays that were provided by the client.
+                for (final overlayBuilder in widget.documentOverlayBuilders) //
+                  (context) => overlayBuilder.build(context, _readerContext),
+              ],
+              debugPaint: widget.debugPaint,
+            ),
+          ),
+        );
+      }),
     );
+  }
+
+  /// Builds an [InheritedWidget] that holds a shared context for editor controls,
+  /// e.g., caret, handles, magnifier, toolbar.
+  ///
+  /// This context may be shared by multiple widgets within [SuperEditor]. It's also
+  /// possible that a client app has wrapped [SuperEditor] with its own context
+  /// [InheritedWidget], in which case the context is shared with widgets inside
+  /// of [SuperEditor], and widgets outside of [SuperEditor].
+  Widget _buildGestureControlsScope({
+    required Widget child,
+  }) {
+    switch (_gestureMode) {
+      // case DocumentGestureMode.mouse:
+      // TODO: create context for mouse mode (#1533)
+      // case DocumentGestureMode.android:
+      // TODO: create context for Android (#1509)
+      case DocumentGestureMode.iOS:
+      default:
+        return SuperReaderIosControlsScope(
+          key: _iosControlsContextKey,
+          controller: _iosControlsController,
+          child: child,
+        );
+    }
+  }
+
+  /// Builds any widgets that a platform wants to wrap around the editor viewport,
+  /// e.g., reader toolbar.
+  Widget _buildPlatformSpecificViewportDecorations(
+    BuildContext context, {
+    required Widget child,
+  }) {
+    switch (_gestureMode) {
+      case DocumentGestureMode.iOS:
+        return SuperReaderIosToolbarOverlayManager(
+          tapRegionGroupId: widget.tapRegionGroupId,
+          defaultToolbarBuilder: (overlayContext, mobileToolbarKey, focalPoint) => defaultIosReaderToolbarBuilder(
+            overlayContext,
+            mobileToolbarKey,
+            focalPoint,
+            document,
+            _selection,
+            SuperReaderIosControlsScope.rootOf(context),
+          ),
+          child: SuperReaderIosMagnifierOverlayManager(
+            child: child,
+          ),
+        );
+      case DocumentGestureMode.mouse:
+      case DocumentGestureMode.android:
+      default:
+        return child;
+    }
   }
 
   Widget _buildGestureInteractor(BuildContext context) {
     switch (_gestureMode) {
       case DocumentGestureMode.mouse:
-        return _buildDesktopGestureSystem();
+        return ReadOnlyDocumentMouseInteractor(
+          focusNode: _focusNode,
+          readerContext: _readerContext,
+          contentTapHandler: _contentTapDelegate,
+          autoScroller: _autoScrollController,
+          showDebugPaint: widget.debugPaint.gestures,
+          child: const SizedBox(),
+        );
       case DocumentGestureMode.android:
-        return _buildAndroidGestureSystem();
+        return ReadOnlyAndroidDocumentTouchInteractor(
+          focusNode: _focusNode,
+          tapRegionGroupId: widget.tapRegionGroupId,
+          document: _readerContext.document,
+          documentKey: _docLayoutKey,
+          getDocumentLayout: () => _readerContext.documentLayout,
+          selection: _readerContext.selection,
+          selectionLinks: _selectionLinks,
+          contentTapHandler: _contentTapDelegate,
+          scrollController: _scrollController,
+          handleColor: widget.androidHandleColor ?? Theme.of(context).primaryColor,
+          popoverToolbarBuilder: widget.androidToolbarBuilder ?? (_) => const SizedBox(),
+          createOverlayControlsClipper: widget.createOverlayControlsClipper,
+          showDebugPaint: widget.debugPaint.gestures,
+          overlayController: widget.overlayController,
+        );
       case DocumentGestureMode.iOS:
-        return _buildIOSGestureSystem();
+        return SuperReaderIosDocumentTouchInteractor(
+          focusNode: _focusNode,
+          document: _readerContext.document,
+          documentKey: _docLayoutKey,
+          getDocumentLayout: () => _readerContext.documentLayout,
+          selection: _readerContext.selection,
+          contentTapHandler: _contentTapDelegate,
+          scrollController: _scrollController,
+          showDebugPaint: widget.debugPaint.gestures,
+        );
     }
-  }
-
-  Widget _buildDesktopGestureSystem() {
-    return ReadOnlyDocumentMouseInteractor(
-      focusNode: _focusNode,
-      readerContext: _readerContext,
-      contentTapHandler: _contentTapDelegate,
-      autoScroller: _autoScrollController,
-      showDebugPaint: widget.debugPaint.gestures,
-      child: const SizedBox(),
-    );
-  }
-
-  Widget _buildAndroidGestureSystem() {
-    return ReadOnlyAndroidDocumentTouchInteractor(
-      focusNode: _focusNode,
-      document: _readerContext.document,
-      documentKey: _docLayoutKey,
-      getDocumentLayout: () => _readerContext.documentLayout,
-      selection: _readerContext.selection,
-      selectionLinks: _selectionLinks,
-      contentTapHandler: _contentTapDelegate,
-      scrollController: _scrollController,
-      handleColor: widget.androidHandleColor ?? Theme.of(context).primaryColor,
-      popoverToolbarBuilder: widget.androidToolbarBuilder ?? (_) => const SizedBox(),
-      createOverlayControlsClipper: widget.createOverlayControlsClipper,
-      showDebugPaint: widget.debugPaint.gestures,
-      overlayController: widget.overlayController,
-    );
-  }
-
-  Widget _buildIOSGestureSystem() {
-    return ReadOnlyIOSDocumentTouchInteractor(
-      focusNode: _focusNode,
-      document: _readerContext.document,
-      getDocumentLayout: () => _readerContext.documentLayout,
-      selection: _readerContext.selection,
-      selectionLinks: _selectionLinks,
-      contentTapHandler: _contentTapDelegate,
-      scrollController: _scrollController,
-      documentKey: _docLayoutKey,
-      handleColor: widget.iOSHandleColor ?? Theme.of(context).primaryColor,
-      popoverToolbarBuilder: widget.iOSToolbarBuilder ?? (_) => const SizedBox(),
-      createOverlayControlsClipper: widget.createOverlayControlsClipper,
-      showDebugPaint: widget.debugPaint.gestures,
-      overlayController: widget.overlayController,
-    );
   }
 }
 
-/// A [ReadOnlyDocumentLayerBuilder] that builds a [SelectionLeadersDocumentLayer], which positions
+/// Builds a standard reader-style iOS floating toolbar.
+Widget defaultIosReaderToolbarBuilder(
+  BuildContext context,
+  Key floatingToolbarKey,
+  LeaderLink focalPoint,
+  Document document,
+  ValueListenable<DocumentSelection?> selection,
+  SuperReaderIosControlsController editorControlsController,
+) {
+  if (CurrentPlatform.isWeb) {
+    // On web, we defer to the browser's internal overlay controls for mobile.
+    return const SizedBox();
+  }
+
+  return DefaultIosReaderToolbar(
+    floatingToolbarKey: floatingToolbarKey,
+    focalPoint: focalPoint,
+    document: document,
+    selection: selection,
+    editorControlsController: editorControlsController,
+  );
+}
+
+/// An iOS floating toolbar, which includes standard buttons for a reader use-case.
+class DefaultIosReaderToolbar extends StatelessWidget {
+  const DefaultIosReaderToolbar({
+    super.key,
+    this.floatingToolbarKey,
+    required this.focalPoint,
+    required this.document,
+    required this.selection,
+    required this.editorControlsController,
+  });
+
+  final Key? floatingToolbarKey;
+  final LeaderLink focalPoint;
+  final Document document;
+  final ValueListenable<DocumentSelection?> selection;
+  final SuperReaderIosControlsController editorControlsController;
+
+  @override
+  Widget build(BuildContext context) {
+    return IOSTextEditingFloatingToolbar(
+      floatingToolbarKey: floatingToolbarKey,
+      focalPoint: focalPoint,
+      onCopyPressed: _copy,
+    );
+  }
+
+  /// Copies selected content to the OS clipboard.
+  void _copy() {
+    editorControlsController.hideToolbar();
+
+    if (selection.value == null) {
+      return;
+    }
+
+    final textToCopy = extractTextFromSelection(
+      document: document,
+      documentSelection: selection.value!,
+    );
+    // TODO: figure out a general approach for asynchronous behaviors that
+    //       need to be carried out in response to user input.
+    Clipboard.setData(ClipboardData(text: textToCopy));
+  }
+}
+
+/// Default list of document overlays that are displayed on top of the document
+/// layout in a [SuperReader].
+const defaultSuperReaderDocumentOverlayBuilders = [
+  // Adds a Leader around the document selection at a focal point for the
+  // iOS floating toolbar.
+  SuperReaderIosToolbarFocalPointDocumentLayerBuilder(),
+  // Displays caret and drag handles, specifically for iOS.
+  SuperReaderIosHandlesDocumentLayerBuilder(),
+];
+
+/// A [SuperReaderDocumentLayerBuilder] that builds a [SelectionLeadersDocumentLayer], which positions
 /// leader widgets at the base and extent of the user's selection, so that other widgets
 /// can position themselves relative to the user's selection.
-class _SelectionLeadersDocumentLayerBuilder implements ReadOnlyDocumentLayerBuilder {
+class _SelectionLeadersDocumentLayerBuilder implements SuperReaderDocumentLayerBuilder {
   const _SelectionLeadersDocumentLayerBuilder({
     required this.links,
     // ignore: unused_element
@@ -447,8 +621,30 @@ class _SelectionLeadersDocumentLayerBuilder implements ReadOnlyDocumentLayerBuil
     return SelectionLeadersDocumentLayer(
       document: readerContext.document,
       selection: readerContext.selection,
-      documentLayoutResolver: () => readerContext.documentLayout,
       links: links,
+      showDebugLeaderBounds: showDebugLeaderBounds,
+    );
+  }
+}
+
+/// A [SuperReaderDocumentLayerBuilder] that builds a [IosToolbarFocalPointDocumentLayer], which
+/// positions a `Leader` widget around the document selection, as a focal point for an
+/// iOS floating toolbar.
+class SuperReaderIosToolbarFocalPointDocumentLayerBuilder implements SuperReaderDocumentLayerBuilder {
+  const SuperReaderIosToolbarFocalPointDocumentLayerBuilder({
+    // ignore: unused_element
+    this.showDebugLeaderBounds = false,
+  });
+
+  /// Whether to paint colorful bounds around the leader widget.
+  final bool showDebugLeaderBounds;
+
+  @override
+  ContentLayerWidget build(BuildContext context, SuperReaderContext readerContext) {
+    return IosToolbarFocalPointDocumentLayer(
+      document: readerContext.document,
+      selection: readerContext.selection,
+      toolbarFocalPointLink: SuperReaderIosControlsScope.rootOf(context).toolbarFocalPoint,
       showDebugLeaderBounds: showDebugLeaderBounds,
     );
   }
@@ -456,7 +652,7 @@ class _SelectionLeadersDocumentLayerBuilder implements ReadOnlyDocumentLayerBuil
 
 /// Builds widgets that are displayed at the same position and size as
 /// the document layout within a [SuperReader].
-abstract class ReadOnlyDocumentLayerBuilder {
+abstract class SuperReaderDocumentLayerBuilder {
   ContentLayerWidget build(BuildContext context, SuperReaderContext documentContext);
 }
 
@@ -507,7 +703,7 @@ class SuperReaderLaunchLinkTapHandler extends ContentTapDelegate {
     final tappedAttributions = textNode.text.getAllAttributionsAt(nodePosition.offset);
     for (final tappedAttribution in tappedAttributions) {
       if (tappedAttribution is LinkAttribution) {
-        return tappedAttribution.url;
+        return tappedAttribution.uri;
       }
     }
 
@@ -534,9 +730,9 @@ final readOnlyDefaultStylesheet = Stylesheet(
       BlockSelector.all,
       (doc, docNode) {
         return {
-          "maxWidth": 640.0,
-          "padding": const CascadingPadding.symmetric(horizontal: 24),
-          "textStyle": const TextStyle(
+          Styles.maxWidth: 640.0,
+          Styles.padding: const CascadingPadding.symmetric(horizontal: 24),
+          Styles.textStyle: const TextStyle(
             color: Colors.black,
             fontSize: 18,
             height: 1.4,
@@ -548,8 +744,8 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("header1"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 40),
-          "textStyle": const TextStyle(
+          Styles.padding: const CascadingPadding.only(top: 40),
+          Styles.textStyle: const TextStyle(
             color: Color(0xFF333333),
             fontSize: 38,
             fontWeight: FontWeight.bold,
@@ -561,8 +757,8 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("header2"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 32),
-          "textStyle": const TextStyle(
+          Styles.padding: const CascadingPadding.only(top: 32),
+          Styles.textStyle: const TextStyle(
             color: Color(0xFF333333),
             fontSize: 26,
             fontWeight: FontWeight.bold,
@@ -574,8 +770,8 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("header3"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 28),
-          "textStyle": const TextStyle(
+          Styles.padding: const CascadingPadding.only(top: 28),
+          Styles.textStyle: const TextStyle(
             color: Color(0xFF333333),
             fontSize: 22,
             fontWeight: FontWeight.bold,
@@ -587,7 +783,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("paragraph"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 24),
+          Styles.padding: const CascadingPadding.only(top: 24),
         };
       },
     ),
@@ -595,7 +791,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("paragraph").after("header1"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 0),
+          Styles.padding: const CascadingPadding.only(top: 0),
         };
       },
     ),
@@ -603,7 +799,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("paragraph").after("header2"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 0),
+          Styles.padding: const CascadingPadding.only(top: 0),
         };
       },
     ),
@@ -611,7 +807,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("paragraph").after("header3"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 0),
+          Styles.padding: const CascadingPadding.only(top: 0),
         };
       },
     ),
@@ -619,7 +815,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("listItem"),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(top: 24),
+          Styles.padding: const CascadingPadding.only(top: 24),
         };
       },
     ),
@@ -627,7 +823,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       const BlockSelector("blockquote"),
       (doc, docNode) {
         return {
-          "textStyle": const TextStyle(
+          Styles.textStyle: const TextStyle(
             color: Colors.grey,
             fontSize: 20,
             fontWeight: FontWeight.bold,
@@ -640,7 +836,7 @@ final readOnlyDefaultStylesheet = Stylesheet(
       BlockSelector.all.last(),
       (doc, docNode) {
         return {
-          "padding": const CascadingPadding.only(bottom: 96),
+          Styles.padding: const CascadingPadding.only(bottom: 96),
         };
       },
     ),
@@ -676,6 +872,10 @@ TextStyle readOnlyDefaultStyleBuilder(Set<Attribution> attributions) {
         decoration: newStyle.decoration == null
             ? TextDecoration.lineThrough
             : TextDecoration.combine([TextDecoration.lineThrough, newStyle.decoration!]),
+      );
+    } else if (attribution is ColorAttribution) {
+      newStyle = newStyle.copyWith(
+        color: attribution.color,
       );
     } else if (attribution is LinkAttribution) {
       newStyle = newStyle.copyWith(

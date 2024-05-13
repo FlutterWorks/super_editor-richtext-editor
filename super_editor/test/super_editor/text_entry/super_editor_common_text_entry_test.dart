@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
@@ -9,13 +11,9 @@ import '../supereditor_test_tools.dart';
 void main() {
   group("SuperEditor common text entry >", () {
     testWidgetsOnDesktop("control keys don't impact content", (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleParagraph()
-          .withInputSource(_desktopInputSourceAndControlKeyVariant.currentValue!.inputSource)
-          .pump();
+      await _pumpApp(tester, _desktopInputSourceAndControlKeyVariant.currentValue!.inputSource);
 
-      final initialParagraphText = SuperEditorInspector.findTextInParagraph("1");
+      final initialParagraphText = SuperEditorInspector.findTextInComponent("1");
 
       // Select some content -> "Lorem |ipsum| dolor sit..."
       await tester.doubleTapInParagraph("1", 8);
@@ -28,22 +26,18 @@ void main() {
       // Press a control key.
       await tester.sendKeyEvent(
         _desktopInputSourceAndControlKeyVariant.currentValue!.controlKey,
-        platform: _desktopInputSourceAndControlKeyVariant.currentValue!.platform,
+        platform: _platformNames[defaultTargetPlatform]!,
       );
 
       // Make sure the content and selection remains the same.
-      expect(SuperEditorInspector.findTextInParagraph("1"), initialParagraphText);
+      expect(SuperEditorInspector.findTextInComponent("1"), initialParagraphText);
       expect(SuperEditorInspector.findDocumentSelection(), expectedSelection);
     }, variant: _desktopInputSourceAndControlKeyVariant);
 
     testWidgetsOnMobile("control keys don't impact content", (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleParagraph()
-          .withInputSource(_mobileInputSourceAndControlKeyVariant.currentValue!.inputSource)
-          .pump();
+      await _pumpApp(tester, _mobileInputSourceAndControlKeyVariant.currentValue!.inputSource);
 
-      final initialParagraphText = SuperEditorInspector.findTextInParagraph("1");
+      final initialParagraphText = SuperEditorInspector.findTextInComponent("1");
 
       // Select some content -> "Lorem |ipsum| dolor sit..."
       await tester.doubleTapInParagraph("1", 8);
@@ -56,51 +50,75 @@ void main() {
       // Press a control key.
       await tester.sendKeyEvent(
         _mobileInputSourceAndControlKeyVariant.currentValue!.controlKey,
-        platform: _mobileInputSourceAndControlKeyVariant.currentValue!.platform,
+        platform: _platformNames[defaultTargetPlatform]!,
       );
 
       // Make sure the content and selection remains the same.
-      expect(SuperEditorInspector.findTextInParagraph("1"), initialParagraphText);
+      expect(SuperEditorInspector.findTextInComponent("1"), initialParagraphText);
       expect(SuperEditorInspector.findDocumentSelection(), expectedSelection);
     }, variant: _mobileInputSourceAndControlKeyVariant);
   });
 }
 
+Future<void> _pumpApp(WidgetTester tester, TextInputSource inputSource) async {
+  await tester //
+      .createDocument()
+      .withSingleParagraph()
+      .withInputSource(inputSource)
+      .withCustomWidgetTreeBuilder((superEditor) {
+    return MaterialApp(
+      home: Scaffold(
+        body: Column(
+          children: [
+            // Add focusable widgets before and after SuperEditor so that we
+            // catch any keys that try to move focus forward or backward.
+            const Focus(child: SizedBox(width: double.infinity, height: 54)),
+            Expanded(
+              child: superEditor,
+            ),
+            const Focus(child: SizedBox(width: double.infinity, height: 54)),
+          ],
+        ),
+      ),
+    );
+  }).pump();
+}
+
 final _mobileInputSourceAndControlKeyVariant = ValueVariant({
-  for (final platform in _mobilePlatforms)
-    for (final inputSource in TextInputSource.values)
-      for (final controlKey in _allPlatformControlKeys) //
-        _InputSourceAndControlKey(inputSource, controlKey, platform),
+  for (final inputSource in TextInputSource.values)
+    for (final controlKey in _allPlatformControlKeys) //
+      _InputSourceAndControlKey(inputSource, controlKey),
 });
 
 final _desktopInputSourceAndControlKeyVariant = ValueVariant({
-  for (final platform in _desktopPlatforms)
-    for (final inputSource in TextInputSource.values)
-      for (final controlKey in _desktopControlKeys) //
-        _InputSourceAndControlKey(inputSource, controlKey, platform),
+  for (final inputSource in TextInputSource.values)
+    for (final controlKey in _desktopControlKeys) //
+      _InputSourceAndControlKey(inputSource, controlKey),
 });
 
 // TODO: Replace raw strings with constants when Flutter offers them (https://github.com/flutter/flutter/issues/133295)
-final _mobilePlatforms = ["android", "ios"];
-final _desktopPlatforms = ["macos", "windows", "linux"];
+final _platformNames = {
+  TargetPlatform.android: "android",
+  TargetPlatform.iOS: "ios",
+  TargetPlatform.macOS: "macos",
+  TargetPlatform.windows: "windows",
+  TargetPlatform.linux: "linux",
+};
 
 class _InputSourceAndControlKey {
   _InputSourceAndControlKey(
     this.inputSource,
     this.controlKey,
-    this.platform,
   );
 
   final TextInputSource inputSource;
   final LogicalKeyboardKey controlKey;
-  final String platform;
 
   @override
-  String toString() => "$inputSource, ${controlKey.keyLabel}, $platform";
+  String toString() => "$inputSource, ${controlKey.keyLabel}";
 }
 
 final _allPlatformControlKeys = {
-  LogicalKeyboardKey.tab,
   LogicalKeyboardKey.capsLock,
   LogicalKeyboardKey.shift,
   LogicalKeyboardKey.control,

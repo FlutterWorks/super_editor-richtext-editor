@@ -46,6 +46,9 @@ final defaultRequestHandlers = List.unmodifiable(<EditRequestHandler>[
   (request) => request is ChangeComposingRegionRequest //
       ? ChangeComposingRegionCommand(request.composingRegion)
       : null,
+  (request) => request is ClearComposingRegionRequest //
+      ? ChangeComposingRegionCommand(null)
+      : null,
   (request) => request is ChangeInteractionModeRequest //
       ? ChangeInteractionModeCommand(isInteractionModeDesired: request.isInteractionModeDesired)
       : null,
@@ -54,6 +57,18 @@ final defaultRequestHandlers = List.unmodifiable(<EditRequestHandler>[
           documentPosition: request.documentPosition,
           textToInsert: request.textToInsert,
           attributions: request.attributions,
+        )
+      : null,
+  (request) => request is InsertAttributedTextRequest
+      ? InsertAttributedTextCommand(
+          documentPosition: request.documentPosition,
+          textToInsert: request.textToInsert,
+        )
+      : null,
+  (request) => request is PasteStructuredContentEditorRequest
+      ? PasteStructuredContentEditorCommand(
+          content: request.content,
+          pastePosition: request.pastePosition,
         )
       : null,
   (request) => request is InsertNodeAtIndexRequest
@@ -80,8 +95,8 @@ final defaultRequestHandlers = List.unmodifiable(<EditRequestHandler>[
   (request) => request is ReplaceNodeWithEmptyParagraphWithCaretRequest
       ? ReplaceNodeWithEmptyParagraphWithCaretCommand(nodeId: request.nodeId)
       : null,
-  (request) => request is DeleteSelectionRequest //
-      ? DeleteSelectionCommand(documentSelection: request.documentSelection)
+  (request) => request is DeleteContentRequest //
+      ? DeleteContentCommand(documentRange: request.documentRange)
       : null,
   (request) => request is DeleteUpstreamAtBeginningOfNodeRequest && request.node is ListItemNode
       ? ConvertListItemToParagraphCommand(nodeId: request.node.id, paragraphMetadata: request.node.metadata)
@@ -111,6 +126,12 @@ final defaultRequestHandlers = List.unmodifiable(<EditRequestHandler>[
       ? InsertCharacterAtCaretCommand(
           character: request.character,
           ignoreComposerAttributions: request.ignoreComposerAttributions,
+        )
+      : null,
+  (request) => request is ChangeParagraphAlignmentRequest
+      ? ChangeParagraphAlignmentCommand(
+          nodeId: request.nodeId,
+          alignment: request.alignment,
         )
       : null,
   (request) => request is ChangeParagraphBlockTypeRequest
@@ -174,16 +195,19 @@ final defaultRequestHandlers = List.unmodifiable(<EditRequestHandler>[
       : null,
   (request) => request is AddTextAttributionsRequest
       ? AddTextAttributionsCommand(
-          documentSelection: request.documentSelection,
+          documentRange: request.documentRange,
           attributions: request.attributions,
           autoMerge: request.autoMerge,
         )
       : null,
   (request) => request is ToggleTextAttributionsRequest
-      ? ToggleTextAttributionsCommand(documentSelection: request.documentSelection, attributions: request.attributions)
+      ? ToggleTextAttributionsCommand(documentRange: request.documentRange, attributions: request.attributions)
       : null,
   (request) => request is RemoveTextAttributionsRequest
-      ? RemoveTextAttributionsCommand(documentSelection: request.documentSelection, attributions: request.attributions)
+      ? RemoveTextAttributionsCommand(documentRange: request.documentRange, attributions: request.attributions)
+      : null,
+  (request) => request is ChangeSingleColumnLayoutComponentStylesRequest
+      ? ChangeSingleColumnLayoutComponentStylesCommand(nodeId: request.nodeId, styles: request.styles) //
       : null,
   (request) => request is ConvertTextNodeToParagraphRequest
       ? ConvertTextNodeToParagraphCommand(nodeId: request.nodeId, newMetadata: request.newMetadata)
@@ -208,5 +232,6 @@ final defaultEditorReactions = List.unmodifiable([
   const BlockquoteConversionReaction(),
   const HorizontalRuleConversionReaction(),
   const ImageUrlConversionReaction(),
+  const DashConversionReaction(),
   //---- End Content Conversions ---
 ]);

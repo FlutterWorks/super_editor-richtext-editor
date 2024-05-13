@@ -230,7 +230,7 @@ void main() {
       });
 
       group('inserts line', () {
-        testWidgetsOnWindowsAndLinux('when ENTER is pressed in middle of text', (tester) async {
+        testWidgetsOnDesktop('when ENTER is pressed in middle of text', (tester) async {
           await _pumpSuperTextField(
             tester,
             AttributedTextEditingController(
@@ -239,31 +239,13 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(8);
 
-          await tester.pressEnter();
+          await tester.pressEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "this is \nsome text");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 9));
         });
 
-        testWidgetsOnMac('when ENTER is pressed in middle of text (on MAC)', (tester) async {
-          await _pumpSuperTextField(
-            tester,
-            AttributedTextEditingController(
-              text: AttributedText('this is some text'),
-            ),
-          );
-          await tester.placeCaretInSuperTextField(8);
-
-          // Simulate the user pressing ENTER.
-          // On macOS, pressing ENTER generates a new line input action.
-          await tester.testTextInput.receiveAction(TextInputAction.newline);
-          await tester.pump();
-
-          expect(SuperTextFieldInspector.findText().text, "this is \nsome text");
-          expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 9));
-        });
-
-        testWidgetsOnWindowsAndLinux('when ENTER is pressed at beginning of text', (tester) async {
+        testWidgetsOnDesktop('when ENTER is pressed at beginning of text', (tester) async {
           await _pumpSuperTextField(
             tester,
             AttributedTextEditingController(
@@ -272,31 +254,13 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(0);
 
-          await tester.pressEnter();
+          await tester.pressEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "\nthis is some text");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 1));
         });
 
-        testWidgetsOnMac('when ENTER is pressed at beginning of text (on MAC)', (tester) async {
-          await _pumpSuperTextField(
-            tester,
-            AttributedTextEditingController(
-              text: AttributedText('this is some text'),
-            ),
-          );
-          await tester.placeCaretInSuperTextField(0);
-
-          // Simulate the user pressing ENTER.
-          // On macOS, pressing ENTER generates a new line input action.
-          await tester.testTextInput.receiveAction(TextInputAction.newline);
-          await tester.pump();
-
-          expect(SuperTextFieldInspector.findText().text, "\nthis is some text");
-          expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 1));
-        });
-
-        testWidgetsOnWindowsAndLinux('when ENTER is pressed at end of text', (tester) async {
+        testWidgetsOnDesktop('when ENTER is pressed at end of text', (tester) async {
           await _pumpSuperTextField(
             tester,
             AttributedTextEditingController(
@@ -305,31 +269,13 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(17);
 
-          await tester.pressEnter();
+          await tester.pressEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "this is some text\n");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 18));
         });
 
-        testWidgetsOnMac('when ENTER is pressed at end of text (on MAC)', (tester) async {
-          await _pumpSuperTextField(
-            tester,
-            AttributedTextEditingController(
-              text: AttributedText('this is some text'),
-            ),
-          );
-          await tester.placeCaretInSuperTextField(17);
-
-          // Simulate the user pressing ENTER.
-          // On macOS, pressing ENTER generates a new line input action.
-          await tester.testTextInput.receiveAction(TextInputAction.newline);
-          await tester.pump();
-
-          expect(SuperTextFieldInspector.findText().text, "this is some text\n");
-          expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 18));
-        });
-
-        // TODO: Make this a Windows + Linux test when Flutter supports numpad enter on windows
+        // TODO: Merge this with the testWidgetsOnMac below when Flutter supports numpad enter on windows
         testWidgetsOnLinux('when NUMPAD ENTER is pressed in middle of text', (tester) async {
           await _pumpSuperTextField(
             tester,
@@ -339,7 +285,7 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(8);
 
-          await tester.pressNumpadEnter();
+          await tester.pressNumpadEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "this is \nsome text");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 9));
@@ -354,16 +300,13 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(8);
 
-          // Simulate the user pressing ENTER.
-          // On macOS, pressing ENTER generates a new line input action.
-          await tester.testTextInput.receiveAction(TextInputAction.newline);
-          await tester.pump();
+          await tester.pressNumpadEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "this is \nsome text");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 9));
         });
 
-        // TODO: Make this a Windows + Linux test when Flutter supports numpad enter on windows
+        // TODO: Merge this with the testWidgetsOnMac below when Flutter supports numpad enter on windows
         testWidgetsOnLinux('when NUMPAD ENTER is pressed at beginning of text', (tester) async {
           await _pumpSuperTextField(
             tester,
@@ -373,7 +316,7 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(0);
 
-          await tester.pressNumpadEnter();
+          await tester.pressNumpadEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "\nthis is some text");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 1));
@@ -388,16 +331,13 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(0);
 
-          // Simulate the user pressing ENTER.
-          // On macOS, pressing ENTER generates a new line input action.
-          await tester.testTextInput.receiveAction(TextInputAction.newline);
-          await tester.pump();
+          await tester.pressNumpadEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "\nthis is some text");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 1));
         });
 
-        // TODO: Make this a Windows + Linux test when Flutter supports numpad enter on windows
+        // TODO: Merge this with the testWidgetsOnMac below when Flutter supports numpad enter on windows
         testWidgetsOnLinux('when NUMPAD ENTER is pressed at end of text', (tester) async {
           await _pumpSuperTextField(
             tester,
@@ -407,7 +347,7 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(17);
 
-          await tester.pressNumpadEnter();
+          await tester.pressNumpadEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "this is some text\n");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 18));
@@ -422,10 +362,7 @@ void main() {
           );
           await tester.placeCaretInSuperTextField(17);
 
-          // Simulate the user pressing ENTER.
-          // On macOS, pressing ENTER generates a new line input action.
-          await tester.testTextInput.receiveAction(TextInputAction.newline);
-          await tester.pump();
+          await tester.pressNumpadEnterAdaptive(getter: imeClientGetter);
 
           expect(SuperTextFieldInspector.findText().text, "this is some text\n");
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 18));
@@ -482,6 +419,107 @@ void main() {
           expect(SuperTextFieldInspector.findSelection(), const TextSelection.collapsed(offset: 0));
           expect(SuperTextFieldInspector.findText().text, "is long enough to be multiline in the available space");
         });
+      });
+
+      testWidgetsOnAllPlatforms('clears composing region after selection changes', (tester) async {
+        final controller = ImeAttributedTextEditingController();
+        await _pumpSuperTextField(tester, controller);
+
+        // Place the caret at the beginning of the textfield.
+        await tester.placeCaretInSuperTextField(0);
+
+        // Type something to have some text to tap on.
+        await tester.typeImeText('Composing: ');
+
+        // Ensure we don't have a composing region.
+        expect(controller.composingRegion, TextRange.empty);
+
+        // Simulate an insertion containing a composing region.
+        await tester.ime.sendDeltas(
+          [
+            const TextEditingDeltaInsertion(
+              oldText: 'Composing: ',
+              textInserted: "あs",
+              insertionOffset: 11,
+              selection: TextSelection.collapsed(offset: 13),
+              composing: TextRange(start: 11, end: 13),
+            ),
+          ],
+          getter: imeClientGetter,
+        );
+
+        // Ensure the textfield applied the composing region.
+        expect(controller.composingRegion, const TextRange(start: 11, end: 13));
+
+        int? composingBase;
+        int? composingExtent;
+
+        // Intercept the setEditingState message sent to the platform to check if we
+        // cleared the IME composing region when changing the selection.
+        tester
+            .interceptChannel(SystemChannels.textInput.name) //
+            .interceptMethod(
+          'TextInput.setEditingState',
+          (methodCall) {
+            composingBase = methodCall.arguments["composingBase"];
+            composingExtent = methodCall.arguments["composingExtent"];
+            return null;
+          },
+        );
+
+        // Place the caret at the beginning of the textfield.
+        await tester.placeCaretInSuperTextField(0);
+
+        // Ensure we cleared the composing region.
+        expect(composingBase, -1);
+        expect(composingExtent, -1);
+
+        // Ensure the textfield composing region was cleared.
+        expect(controller.composingRegion, TextRange.empty);
+      });
+
+      testWidgetsOnAllPlatforms('clears composing region after losing focus', (tester) async {
+        final controller = ImeAttributedTextEditingController();
+        final focusNode = FocusNode();
+
+        await _pumpSuperTextField(
+          tester,
+          controller,
+          focusNode: focusNode,
+        );
+
+        // Place the caret at the beginning of the textfield.
+        await tester.placeCaretInSuperTextField(0);
+
+        // Type something to have some text to tap on.
+        await tester.typeImeText('Composing: ');
+
+        // Ensure we don't have a composing region.
+        expect(controller.composingRegion, TextRange.empty);
+
+        // Simulate an insertion containing a composing region.
+        await tester.ime.sendDeltas(
+          [
+            const TextEditingDeltaInsertion(
+              oldText: 'Composing: ',
+              textInserted: "あs",
+              insertionOffset: 11,
+              selection: TextSelection.collapsed(offset: 13),
+              composing: TextRange(start: 11, end: 13),
+            ),
+          ],
+          getter: imeClientGetter,
+        );
+
+        // Ensure the textfield applied the composing region.
+        expect(controller.composingRegion, const TextRange(start: 11, end: 13));
+
+        // Remove focus from the textfield.
+        focusNode.unfocus();
+        await tester.pump();
+
+        // Ensure the composing region was cleared.
+        expect(controller.composingRegion, TextRange.empty);
       });
     });
 
@@ -591,6 +629,157 @@ void main() {
     });
   });
 
+  testWidgetsOnAllPlatforms('updates IME configuration when it changes', (tester) async {
+    final brightnessNotifier = ValueNotifier(Brightness.dark);
+
+    // Pump a SuperTextField with an IME configuration with values
+    // that differ from the defaults.
+    await tester.pumpWidget(
+      _buildScaffold(
+        child: ValueListenableBuilder(
+          valueListenable: brightnessNotifier,
+          builder: (context, brightness, child) {
+            return SuperTextField(
+              inputSource: TextInputSource.ime,
+              imeConfiguration: TextInputConfiguration(
+                enableSuggestions: false,
+                autocorrect: false,
+                inputAction: TextInputAction.search,
+                keyboardAppearance: brightness,
+                inputType: TextInputType.number,
+                enableDeltaModel: false,
+                textCapitalization: TextCapitalization.characters,
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    // Holds the IME configuration values passed to the platform.
+    String? inputAction;
+    String? inputType;
+    bool? autocorrect;
+    bool? enableSuggestions;
+    String? keyboardAppearance;
+    bool? enableDeltaModel;
+    String? textCapitalization;
+
+    // Intercept the setClient message sent to the platform to check the configuration.
+    tester
+        .interceptChannel(SystemChannels.textInput.name) //
+        .interceptMethod(
+      'TextInput.setClient',
+      (methodCall) {
+        final params = methodCall.arguments[1] as Map;
+        inputAction = params['inputAction'];
+        autocorrect = params['autocorrect'];
+        enableSuggestions = params['enableSuggestions'];
+        keyboardAppearance = params['keyboardAppearance'];
+        enableDeltaModel = params['enableDeltaModel'];
+        textCapitalization = params['textCapitalization'];
+
+        final inputTypeConfig = params['inputType'] as Map;
+        inputType = inputTypeConfig['name'];
+
+        return null;
+      },
+    );
+
+    // Tap to focus the text field and attach to the IME.
+    await tester.placeCaretInSuperTextField(0);
+
+    // Ensure we use the values from the configuration.
+    expect(inputAction, 'TextInputAction.search');
+    expect(inputType, 'TextInputType.number');
+    expect(autocorrect, false);
+    expect(enableSuggestions, false);
+    expect(enableDeltaModel, true);
+    expect(textCapitalization, 'TextCapitalization.characters');
+    expect(keyboardAppearance, 'Brightness.dark');
+
+    // Change the brightness to rebuild the widget
+    // and re-attach to the IME.
+    brightnessNotifier.value = Brightness.light;
+    await tester.pump();
+
+    // Ensure we use the values from the configuration,
+    // updating only the keyboard appearance.
+    expect(inputAction, 'TextInputAction.search');
+    expect(inputType, 'TextInputType.number');
+    expect(autocorrect, false);
+    expect(enableSuggestions, false);
+    expect(enableDeltaModel, true);
+    expect(textCapitalization, 'TextCapitalization.characters');
+    expect(keyboardAppearance, 'Brightness.light');
+  });
+
+  testWidgetsOnAllPlatforms('doesn\'t re-attach to IME if the configuration doesn\'t change', (tester) async {
+    // Keeps track of how many times TextInput.setClient was called.
+    int imeConnectionCount = 0;
+
+    // Explicitly avoid using const to ensure that we have two
+    // TextInputConfiguration instances with the same values.
+    //
+    // ignore: prefer_const_constructors
+    final configuration1 = TextInputConfiguration(
+      enableSuggestions: false,
+      autocorrect: false,
+      inputAction: TextInputAction.search,
+      keyboardAppearance: Brightness.dark,
+      inputType: TextInputType.number,
+      enableDeltaModel: false,
+    );
+    // ignore: prefer_const_constructors
+    final configuration2 = TextInputConfiguration(
+      enableSuggestions: false,
+      autocorrect: false,
+      inputAction: TextInputAction.search,
+      keyboardAppearance: Brightness.dark,
+      inputType: TextInputType.number,
+      enableDeltaModel: false,
+    );
+
+    final inputConfigurationNotifier = ValueNotifier(configuration1);
+
+    // Pump a SuperTextField with an IME configuration with values
+    // that differ from the defaults.
+    await tester.pumpWidget(
+      _buildScaffold(
+        child: ValueListenableBuilder(
+          valueListenable: inputConfigurationNotifier,
+          builder: (context, inputConfiguration, child) {
+            return SuperTextField(
+              inputSource: TextInputSource.ime,
+              imeConfiguration: inputConfiguration,
+            );
+          },
+        ),
+      ),
+    );
+
+    // Intercept the setClient message sent to the platform.
+    tester
+        .interceptChannel(SystemChannels.textInput.name) //
+        .interceptMethod(
+      'TextInput.setClient',
+      (methodCall) {
+        imeConnectionCount += 1;
+        return null;
+      },
+    );
+
+    // Tap to focus the text field and attach to the IME.
+    await tester.placeCaretInSuperTextField(0);
+
+    // Change the configuration instance to trigger a rebuild.
+    inputConfigurationNotifier.value = configuration2;
+    await tester.pump();
+
+    // Ensure the connection was performed only once.
+    expect(imeConnectionCount, 1);
+  });
+
   group('SuperTextField on some bad Android software keyboards', () {
     testWidgetsOnAndroid('handles BACKSPACE key event instead of deletion for a collapsed selection (on Android)',
         (tester) async {
@@ -660,6 +849,7 @@ Future<void> _pumpEmptySuperTextField(WidgetTester tester) async {
 Future<void> _pumpSuperTextField(
   WidgetTester tester,
   AttributedTextEditingController controller, {
+  FocusNode? focusNode,
   int? minLines,
   int? maxLines,
 }) async {
@@ -673,6 +863,7 @@ Future<void> _pumpSuperTextField(
         child: SizedBox(
           width: 320,
           child: SuperTextField(
+            focusNode: focusNode,
             textController: controller,
             inputSource: TextInputSource.ime,
             minLines: minLines,

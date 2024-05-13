@@ -265,7 +265,7 @@ class AttributedSpans {
     return _markers //
         .reversed // search from the end so its the nearest start marker
         .where((marker) {
-      return attribution == null || (marker.attribution.id == attribution.id);
+      return attribution == null || (marker.attribution == attribution);
     }).firstWhereOrNull((marker) => marker.isStart && marker.offset <= offset);
   }
 
@@ -921,7 +921,7 @@ class AttributedSpans {
 
     _log.fine('walking list of markers to determine collapsed spans.');
     for (final marker in _markers) {
-      if (marker.offset > contentLength) {
+      if (marker.offset > contentLength - 1) {
         // There are markers to process but we ran off the end of the requested content. Break early and handle
         // committing the last span if necessary below.
         _log.fine('ran out of markers within the requested contentLength, breaking early.');

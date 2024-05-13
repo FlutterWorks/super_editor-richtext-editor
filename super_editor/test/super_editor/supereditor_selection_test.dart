@@ -1,14 +1,13 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
-import 'package:super_editor/src/infrastructure/blinking_caret.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
 import '../super_textfield/super_textfield_robot.dart';
+import '../test_tools.dart';
 import 'supereditor_test_tools.dart';
 
 void main() {
@@ -307,6 +306,85 @@ void main() {
       );
     });
 
+    testWidgetsOnArbitraryDesktop("keeps selection base while dragging a selection across components that change size",
+        (tester) async {
+      final document = MutableDocument(
+        nodes: [
+          TaskNode(
+            id: '1',
+            text: AttributedText('Task 1'),
+            isComplete: false,
+          ),
+          TaskNode(
+            id: '2',
+            text: AttributedText('Task 2'),
+            isComplete: false,
+          ),
+          TaskNode(
+            id: '3',
+            text: AttributedText('Task 3'),
+            isComplete: false,
+          ),
+        ],
+      );
+
+      await tester //
+          .createDocument()
+          .withCustomContent(document)
+          .withAddedComponents([ExpandingTaskComponentBuilder()]) //
+          .pump();
+
+      // Place the caret at "Tas|k 3" to make it expand.
+      await tester.placeCaretInParagraph('3', 3);
+      expect(
+        SuperEditorInspector.findDocumentSelection(),
+        selectionEquivalentTo(
+          const DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: '3',
+              nodePosition: TextNodePosition(offset: 3),
+            ),
+          ),
+        ),
+      );
+
+      // Start dragging from "Tas|k 3" to the beginning of the document.
+      final gesture = await tester.startDocumentDragFromPosition(
+        from: const DocumentPosition(
+          nodeId: '3',
+          nodePosition: TextNodePosition(offset: 3),
+        ),
+      );
+      addTearDown(() => gesture.removePointer());
+
+      // Gradually move up until the beginning of the document.
+      for (int i = 0; i <= 10; i++) {
+        await gesture.moveBy(const Offset(0, -30));
+        await tester.pump();
+      }
+
+      // Ensure the selection expanded to the beginning of the document
+      // and the selection base was retained.
+      expect(
+        SuperEditorInspector.findDocumentSelection(),
+        selectionEquivalentTo(
+          const DocumentSelection(
+            base: DocumentPosition(
+              nodeId: '3',
+              nodePosition: TextNodePosition(offset: 3),
+            ),
+            extent: DocumentPosition(
+              nodeId: '1',
+              nodePosition: TextNodePosition(offset: 0),
+            ),
+          ),
+        ),
+      );
+
+      // Pump with enough time to expire the tap recognizer timer.
+      await tester.pump(kTapTimeout);
+    });
+
     testWidgetsOnAllPlatforms("removes caret when it loses focus", (tester) async {
       await tester
           .createDocument()
@@ -541,6 +619,7 @@ Second Paragraph
       // result.
 
       final textFieldFocus = FocusNode();
+      final subtreeFocus = FocusNode();
       final editorFocus = FocusNode();
       await tester
           .createDocument()
@@ -552,9 +631,9 @@ Second Paragraph
               home: Scaffold(
                 body: Column(
                   children: [
-                    FocusWithCustomParent(
-                      focusNode: textFieldFocus,
-                      parentFocusNode: editorFocus,
+                    Focus(
+                      focusNode: subtreeFocus,
+                      parentNode: editorFocus,
                       child: SuperTextField(
                         focusNode: textFieldFocus,
                         // We put the SuperTextField in keyboard mode so that the SuperTextField
@@ -608,6 +687,7 @@ Second Paragraph
       // result.
 
       final textFieldFocus = FocusNode();
+      final subtreeFocus = FocusNode();
       final editorFocus = FocusNode();
       await tester
           .createDocument()
@@ -622,9 +702,9 @@ Second Paragraph
               home: Scaffold(
                 body: Column(
                   children: [
-                    FocusWithCustomParent(
-                      focusNode: textFieldFocus,
-                      parentFocusNode: editorFocus,
+                    Focus(
+                      focusNode: subtreeFocus,
+                      parentNode: editorFocus,
                       child: SuperTextField(
                         focusNode: textFieldFocus,
                         // We put the SuperTextField in keyboard mode so that the SuperTextField
@@ -674,6 +754,7 @@ Second Paragraph
 
     testWidgetsOnAllPlatforms("retains selection when user types in sub-focus text field", (tester) async {
       final textFieldFocus = FocusNode();
+      final subTreeFocusNode = FocusNode();
       final textFieldController = ImeAttributedTextEditingController();
       final editorFocus = FocusNode();
       const initialEditorSelection = DocumentSelection(
@@ -694,9 +775,9 @@ Second Paragraph
               home: Scaffold(
                 body: Column(
                   children: [
-                    FocusWithCustomParent(
-                      focusNode: textFieldFocus,
-                      parentFocusNode: editorFocus,
+                    Focus(
+                      focusNode: subTreeFocusNode,
+                      parentNode: editorFocus,
                       child: SuperTextField(
                         focusNode: textFieldFocus,
                         textController: textFieldController,
@@ -999,14 +1080,14 @@ Second Paragraph
       // Place the caret at the middle of the first word.
       await tester.placeCaretInParagraph('1', 2);
 
-      final text = SuperEditorInspector.findTextInParagraph('1').text;
+      final text = SuperEditorInspector.findTextInComponent('1').text;
 
       await tester.ime.sendDeltas(
         [
           TextEditingDeltaNonTextUpdate(
-            oldText: text,
-            selection: const TextSelection.collapsed(offset: 6),
-            composing: const TextSelection.collapsed(offset: 6),
+            oldText: '. $text',
+            selection: const TextSelection.collapsed(offset: 8),
+            composing: const TextSelection.collapsed(offset: 8),
           )
         ],
         getter: imeClientGetter,
@@ -1145,9 +1226,5 @@ class _UnselectableHorizontalRuleComponent extends StatelessWidget {
 }
 
 Finder _caretFinder() {
-  if (debugDefaultTargetPlatformOverride == TargetPlatform.iOS ||
-      debugDefaultTargetPlatformOverride == TargetPlatform.android) {
-    return find.byType(BlinkingCaret);
-  }
-  return find.byKey(primaryCaretKey);
+  return find.byKey(DocumentKeys.caret);
 }

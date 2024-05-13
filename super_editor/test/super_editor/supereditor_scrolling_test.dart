@@ -5,10 +5,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/src/infrastructure/blinking_caret.dart';
+import 'package:super_editor/src/infrastructure/flutter/material_scrollbar.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
+import '../test_tools.dart';
 import 'supereditor_test_tools.dart';
+import 'test_documents.dart';
 
 void main() {
   group("SuperEditor scrolling", () {
@@ -180,17 +183,19 @@ void main() {
       // Ensure that the entire document is selected.
       expect(
         SuperEditorInspector.findDocumentSelection(),
-        DocumentSelection(
-          base: DocumentPosition(
-            nodeId: lastParagraph.id,
-            nodePosition: TextNodePosition(
-              offset: lastParagraph.endPosition.offset,
-              affinity: TextAffinity.upstream,
+        selectionEquivalentTo(
+          DocumentSelection(
+            base: DocumentPosition(
+              nodeId: lastParagraph.id,
+              nodePosition: TextNodePosition(
+                offset: lastParagraph.endPosition.offset,
+                affinity: TextAffinity.upstream,
+              ),
             ),
-          ),
-          extent: DocumentPosition(
-            nodeId: firstParagraph.id,
-            nodePosition: firstParagraph.beginningPosition,
+            extent: DocumentPosition(
+              nodeId: firstParagraph.id,
+              nodePosition: firstParagraph.beginningPosition,
+            ),
           ),
         ),
       );
@@ -256,7 +261,7 @@ void main() {
               rules: [
                 StyleRule(BlockSelector.all, (document, node) {
                   return {
-                    "textStyle": const TextStyle(
+                    Styles.textStyle: const TextStyle(
                       color: Colors.black,
                     ),
                   };
@@ -299,7 +304,7 @@ void main() {
               rules: [
                 StyleRule(BlockSelector.all, (document, node) {
                   return {
-                    "textStyle": const TextStyle(
+                    Styles.textStyle: const TextStyle(
                       color: Colors.black,
                     ),
                   };
@@ -486,8 +491,8 @@ void main() {
       }
       final scrollOffsetInMiddleOfMomentum = scrollController.offset;
 
-      // Tap to stop the momentum.
-      await tester.tap(find.byType(SuperEditor));
+      // Tap down to stop the momentum.
+      final gesture = await tester.startGesture(tester.getCenter(find.byType(SuperEditor)));
 
       // Let any remaining momentum run (there shouldn't be any).
       await tester.pumpAndSettle();
@@ -495,8 +500,215 @@ void main() {
       // Ensure that the momentum stopped exactly where we tapped.
       expect(scrollOffsetInMiddleOfMomentum, scrollController.offset);
 
+      // Release the pointer.
+      await gesture.up();
+      await tester.pump();
+
       // Ensure that tapping on the editor didn't place the caret.
       expect(SuperEditorInspector.findDocumentSelection(), isNull);
+    });
+
+    testWidgetsOnDesktop("stops momentum on tap down with trackpad and doesn't place the caret", (tester) async {
+      final scrollController = ScrollController();
+
+      await tester //
+          .createDocument() //
+          .withLongDoc() //
+          .withScrollController(scrollController) //
+          .pump();
+
+      // Ensure the editor initially has no selection.
+      expect(SuperEditorInspector.findDocumentSelection(), isNull);
+
+      // Fling scroll the editor with the trackpad.
+      final scrollGesture = await tester.startGesture(
+        tester.getCenter(find.byType(SuperEditor)),
+        kind: PointerDeviceKind.trackpad,
+      );
+      await scrollGesture.moveBy(const Offset(0, -1000));
+      await scrollGesture.up();
+
+      // Pump a few frames of momentum.
+      for (int i = 0; i < 25; i += 1) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final scrollOffsetInMiddleOfMomentum = scrollController.offset;
+
+      // Ensure the editor scrolled.
+      expect(scrollOffsetInMiddleOfMomentum, greaterThan(0.0));
+
+      // Tap down to stop the momentum.
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byType(SuperEditor)),
+        kind: PointerDeviceKind.trackpad,
+      );
+
+      // Let any remaining momentum run (there shouldn't be any).
+      await tester.pumpAndSettle();
+
+      // Ensure that the momentum stopped exactly where we tapped.
+      expect(scrollController.offset, scrollOffsetInMiddleOfMomentum);
+
+      // Release the pointer.
+      await gesture.up();
+      await tester.pump();
+
+      // Ensure that tapping on the editor didn't change the selection.
+      expect(SuperEditorInspector.findDocumentSelection(), isNull);
+    });
+
+    testWidgetsOnArbitraryDesktop("does not stop momentum on mouse move", (tester) async {
+      final scrollController = ScrollController();
+
+      // Pump an editor with a small size to make it scrollable.
+      await tester //
+          .createDocument() //
+          .withLongDoc() //
+          .withScrollController(scrollController) //
+          .withEditorSize(const Size(300, 300))
+          .pump();
+
+      // Fling scroll with the trackpad to generate momentum.
+      await tester.trackpadFling(
+        find.byType(SuperEditor),
+        const Offset(0.0, -300),
+        300.0,
+      );
+
+      final scrollOffsetInMiddleOfMomentum = scrollController.offset;
+
+      // Move the mouse around.
+      final gesture = await tester.createGesture();
+      await gesture.moveTo(tester.getTopLeft(find.byType(SuperEditor)));
+
+      // Let any momentum run.
+      await tester.pumpAndSettle();
+
+      // Ensure that the momentum didn't stop due to mouse movement.
+      expect(scrollOffsetInMiddleOfMomentum, lessThan(scrollController.offset));
+    });
+
+    testWidgetsOnAndroid("doesn't overscroll when dragging down", (tester) async {
+      final scrollController = ScrollController();
+
+      await tester //
+          .createDocument()
+          .withSingleParagraph()
+          .withScrollController(scrollController)
+          .pump();
+
+      // Ensure the editor didn't start scrolled.
+      expect(scrollController.offset, 0);
+
+      // Drag an arbitrary amount of pixels from the top of the editor with a small margin.
+      final dragGesture = await tester.dragByFrameCount(
+        startLocation: tester.getRect(find.byType(SuperEditor)).topCenter + const Offset(0, 5),
+        totalDragOffset: const Offset(0, 200.0),
+      );
+
+      // Ensure the drag gesture didn't scroll the editor.
+      expect(scrollController.offset, 0);
+
+      // End the gesture.
+      await dragGesture.up();
+
+      // Wait for the long-press timer to resolve.
+      await tester.pumpAndSettle();
+    });
+
+    testWidgetsOnAndroid("doesn't overscroll when dragging up", (tester) async {
+      final scrollController = ScrollController();
+
+      await tester //
+          .createDocument()
+          .withSingleParagraph()
+          .withScrollController(scrollController)
+          .pump();
+
+      // Jump to the bottom.
+      scrollController.jumpTo(scrollController.position.maxScrollExtent);
+
+      // Drag an arbitrary amount of pixels from the bottom of the editor.
+      // The gesture starts with an arbitrary small margin from the bottom.
+      final dragGesture = await tester.dragByFrameCount(
+        startLocation: tester.getRect(find.byType(SuperEditor)).bottomCenter - const Offset(0, 10),
+        totalDragOffset: const Offset(0, -200.0),
+      );
+
+      // Ensure we don't scroll.
+      expect(scrollController.offset, scrollController.position.maxScrollExtent);
+
+      // End the gesture.
+      await dragGesture.up();
+
+      // Wait for the long-press timer to resolve.
+      await tester.pumpAndSettle();
+    });
+
+    testWidgetsOnIos('overscrolls when dragging down', (tester) async {
+      final scrollController = ScrollController();
+
+      await tester //
+          .createDocument()
+          .withSingleParagraph()
+          .withScrollController(scrollController)
+          .pump();
+
+      // Ensure the scrollview didn't start scrolled.
+      expect(scrollController.offset, 0);
+
+      // Drag an arbitrary amount of pixels a few pixels below the top of the editor.
+      final dragGesture = await tester.dragByFrameCount(
+        startLocation: tester.getRect(find.byType(SuperEditor)).topCenter + const Offset(0, 5),
+        totalDragOffset: const Offset(0, 80.0),
+      );
+
+      // Ensure we are overscrolling while holding the pointer down.
+      await tester.pumpAndSettle();
+      expect(scrollController.offset, lessThan(0.0));
+
+      // Release the pointer to end the gesture.
+      await dragGesture.up();
+
+      // Wait for the long-press timer to resolve.
+      await tester.pumpAndSettle();
+
+      // Ensure the we scrolled back to the top.
+      expect(scrollController.offset, 0.0);
+    });
+
+    testWidgetsOnIos('overscrolls when dragging up', (tester) async {
+      final scrollController = ScrollController();
+
+      await tester //
+          .createDocument()
+          .withSingleParagraph()
+          .withScrollController(scrollController)
+          .pump();
+
+      // Jump to the bottom.
+      scrollController.jumpTo(scrollController.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+
+      // Drag an arbitrary amount of pixels from the bottom of the editor.
+      // The gesture starts with an arbitrary margin from the bottom.
+      final dragGesture = await tester.dragByFrameCount(
+        startLocation: tester.getRect(find.byType(SuperEditor)).bottomCenter - const Offset(0, 5),
+        totalDragOffset: const Offset(0, -200.0),
+      );
+
+      // Ensure we are overscrolling while holding the pointer down.
+      await tester.pumpAndSettle();
+      expect(scrollController.offset, greaterThan(scrollController.position.maxScrollExtent));
+
+      // Release the pointer to end the gesture.
+      await dragGesture.up();
+
+      // Wait for the long-press timer to resolve.
+      await tester.pumpAndSettle();
+
+      // Ensure the we scrolled back to the end.
+      expect(scrollController.offset, scrollController.position.maxScrollExtent);
     });
 
     group("within an ancestor Scrollable", () {
@@ -506,7 +718,7 @@ void main() {
       final shrinkPerFrame =
           (screenSizeWithoutKeyboard.height - screenSizeWithKeyboard.height) / keyboardExpansionFrameCount;
 
-      testWidgets('on Android, keeps caret visible when keyboard appears', (WidgetTester tester) async {
+      testWidgetsOnAndroid('on Android, keeps caret visible when keyboard appears', (WidgetTester tester) async {
         tester.view
           ..physicalSize = screenSizeWithoutKeyboard
           ..platformDispatcher.textScaleFactorTestValue = 1.0
@@ -521,6 +733,11 @@ void main() {
         // Select text near the bottom of the screen, where the keyboard will appear
         final tapPosition = Offset(screenSizeWithoutKeyboard.width / 2, screenSizeWithoutKeyboard.height - 1);
         await tester.tapAt(tapPosition);
+        await tester.pump();
+
+        // TODO: add caret finder to inspector
+        final caretFinder = find.byKey(DocumentKeys.caret);
+        expect(caretFinder, findsOneWidget);
 
         // Shrink the screen height, as if the keyboard appeared.
         await _simulateKeyboardAppearance(
@@ -531,9 +748,8 @@ void main() {
         );
 
         // Ensure that the editor auto-scrolled to keep the caret visible.
-        // TODO: there are 2 `BlinkingCaret` at the same time. There should be only 1 caret
-        final caretFinder = find.byType(BlinkingCaret);
-        final caretOffset = tester.getBottomLeft(caretFinder.last);
+        expect(caretFinder, findsOneWidget);
+        final caretOffset = tester.getBottomLeft(caretFinder);
 
         // The default trailing boundary of the default `SuperEditor`
         const trailingBoundary = 54.0;
@@ -543,7 +759,7 @@ void main() {
         expect(caretOffset.dy, greaterThanOrEqualTo(screenSizeWithKeyboard.height - trailingBoundary));
       });
 
-      testWidgets('on iOS, keeps caret visible when keyboard appears', (WidgetTester tester) async {
+      testWidgetsOnIos('on iOS, keeps caret visible when keyboard appears', (WidgetTester tester) async {
         tester.view
           ..physicalSize = screenSizeWithoutKeyboard
           ..platformDispatcher.textScaleFactorTestValue = 1.0
@@ -558,6 +774,7 @@ void main() {
         // Select text near the bottom of the screen, where the keyboard will appear
         final tapPosition = Offset(screenSizeWithoutKeyboard.width / 2, screenSizeWithoutKeyboard.height - 1);
         await tester.tapAt(tapPosition);
+        await tester.pump();
 
         // Shrink the screen height, as if the keyboard appeared.
         await _simulateKeyboardAppearance(
@@ -568,16 +785,233 @@ void main() {
         );
 
         // Ensure that the editor auto-scrolled to keep the caret visible.
-        // TODO: there are 2 `BlinkingCaret` at the same time. There should be only 1 caret
         final caretFinder = find.byType(BlinkingCaret);
-        final caretOffset = tester.getBottomLeft(caretFinder.last);
+        final caretOffset = tester.getBottomLeft(caretFinder);
 
         // The default trailing boundary of the default `SuperEditor`
         const trailingBoundary = 54.0;
 
         // The caret should be at the trailing boundary, within a small margin of error
-        expect(caretOffset.dy, lessThanOrEqualTo(screenSizeWithKeyboard.height - trailingBoundary));
-        expect(caretOffset.dy, greaterThanOrEqualTo(screenSizeWithKeyboard.height - trailingBoundary));
+        expect(caretOffset.dy, lessThanOrEqualTo(screenSizeWithKeyboard.height - trailingBoundary + 2));
+        expect(caretOffset.dy, greaterThanOrEqualTo(screenSizeWithKeyboard.height - trailingBoundary - 2));
+      });
+
+      testWidgetsOnMobile('scrolling and holding the pointer doesn\'t cause the keyboard to open', (tester) async {
+        final scrollController = ScrollController();
+
+        // Pump an editor inside a CustomScrollView without enough room to display
+        // the whole content.
+        await tester
+            .createDocument() //
+            .withLongTextContent()
+            .withEditorSize(const Size(200, 200))
+            .insideCustomScrollView()
+            .withScrollController(scrollController)
+            .pump();
+
+        // Ensure the scrollview didn't start scrolled.
+        expect(scrollController.offset, 0);
+
+        final scrollableRect = tester.getRect(find.byType(CustomScrollView));
+
+        const dragFrameCount = 10;
+        final dragAmountPerFrame = scrollableRect.height / dragFrameCount;
+
+        // Drag from the bottom all the way up to the top of the scrollable.
+        final dragGesture = await tester.startGesture(scrollableRect.bottomCenter - const Offset(0, 1));
+        for (int i = 0; i < dragFrameCount; i += 1) {
+          await dragGesture.moveBy(Offset(0, -dragAmountPerFrame));
+          await tester.pump();
+        }
+
+        // The editor supports long press to select.
+        // Wait long enough to make sure  this gesture wasn't confused with a long press.
+        await tester.pump(kLongPressTimeout + const Duration(milliseconds: 1));
+
+        // Ensure we scrolled, didn't changed the selection and didn't attach to the IME.
+        expect(scrollController.offset, greaterThan(0));
+        expect(SuperEditorInspector.findDocumentSelection(), isNull);
+        expect(tester.testTextInput.hasAnyClients, isFalse);
+
+        // Release the pointer.
+        await dragGesture.up();
+        await dragGesture.removePointer();
+      });
+
+      testWidgetsOnMobile('scrolling and releasing the pointer doesn\'t cause the keyboard to open', (tester) async {
+        final scrollController = ScrollController();
+
+        // Pump an editor inside a CustomScrollView without enough room to display
+        // the whole content.
+        await tester
+            .createDocument() //
+            .withLongTextContent()
+            .withEditorSize(const Size(200, 200))
+            .insideCustomScrollView()
+            .withScrollController(scrollController)
+            .pump();
+
+        // Ensure the scrollview didn't start scrolled.
+        expect(scrollController.offset, 0);
+
+        final scrollableRect = tester.getRect(find.byType(CustomScrollView));
+
+        const dragFrameCount = 10;
+        final dragAmountPerFrame = scrollableRect.height / dragFrameCount;
+
+        // Drag from the bottom all the way up to the top of the scrollable.
+        final dragGesture = await tester.startGesture(scrollableRect.bottomCenter - const Offset(0, 1));
+        for (int i = 0; i < dragFrameCount; i += 1) {
+          await dragGesture.moveBy(Offset(0, -dragAmountPerFrame));
+          await tester.pump();
+        }
+
+        // Stop the scrolling gesture.
+        await dragGesture.up();
+        await dragGesture.removePointer();
+        await tester.pump();
+
+        // The editor supports long press to select.
+        // Wait long enough to make sure  this gesture wasn't confused with a long press.
+        await tester.pump(kLongPressTimeout + const Duration(milliseconds: 1));
+
+        // Ensure we scrolled, didn't changed the selection and didn't attach to the IME.
+        expect(scrollController.offset, greaterThan(0));
+        expect(SuperEditorInspector.findDocumentSelection(), isNull);
+        expect(tester.testTextInput.hasAnyClients, isFalse);
+      });
+
+      testWidgetsOnAndroid("doesn't overscroll when dragging down", (tester) async {
+        final scrollController = ScrollController();
+
+        await tester
+            .createDocument() //
+            .withSingleParagraph()
+            .insideCustomScrollView()
+            .withScrollController(scrollController)
+            .pump();
+
+        // Ensure the scrollview didn't start scrolled.
+        expect(scrollController.offset, 0);
+
+        // Drag an arbitrary amount of pixels from the top of the editor.
+        final dragGesture = await tester.dragByFrameCount(
+          startLocation: tester.getRect(find.byType(SuperEditor)).topCenter + const Offset(0, 5),
+          totalDragOffset: const Offset(0, 400.0),
+        );
+
+        // Ensure we don't scroll.
+        expect(scrollController.offset, 0);
+
+        // End the gesture.
+        await dragGesture.up();
+
+        // Wait for the long-press timer to resolve.
+        await tester.pumpAndSettle();
+      });
+
+      testWidgetsOnAndroid("doesn't overscroll when dragging up", (tester) async {
+        final scrollController = ScrollController();
+
+        // Pump an editor inside a CustomScrollView without enough room to display
+        // the whole content.
+        await tester
+            .createDocument()
+            .withSingleParagraph()
+            .withEditorSize(const Size(200, 200))
+            .insideCustomScrollView()
+            .withScrollController(scrollController)
+            .pump();
+
+        // Jump to the bottom.
+        scrollController.jumpTo(scrollController.position.maxScrollExtent);
+
+        // Drag an arbitrary amount of pixels from the bottom of the editor.
+        final dragGesture = await tester.dragByFrameCount(
+          startLocation: tester.getRect(find.byType(CustomScrollView)).bottomCenter - const Offset(0, 10),
+          totalDragOffset: const Offset(0, -400.0),
+        );
+
+        // Ensure we don't scroll.
+        expect(scrollController.offset, scrollController.position.maxScrollExtent);
+
+        // End the gesture.
+        await dragGesture.up();
+
+        // Wait for the long-press timer to resolve.
+        await tester.pumpAndSettle();
+      });
+
+      testWidgetsOnIos('overscrolls when dragging down', (tester) async {
+        final scrollController = ScrollController();
+
+        // Pump an editor inside a CustomScrollView without enough room to display
+        // the whole content.
+        await tester
+            .createDocument() //
+            .withLongTextContent()
+            .insideCustomScrollView()
+            .withScrollController(scrollController)
+            .pump();
+
+        // Ensure the scrollview didn't start scrolled.
+        expect(scrollController.offset, 0);
+
+        // Drag an arbitrary amount, smaller than the editor size.
+        final dragGesture = await tester.dragByFrameCount(
+          startLocation: tester.getRect(find.byType(CustomScrollView)).topCenter + const Offset(0, 5),
+          totalDragOffset: const Offset(0, 80.0),
+        );
+
+        // Ensure we are overscrolling while holding the pointer down.
+        await tester.pumpAndSettle();
+        expect(scrollController.offset, lessThan(0.0));
+
+        // Release the pointer to end the gesture.
+        await dragGesture.up();
+
+        // Wait for the long-press timer to resolve.
+        await tester.pumpAndSettle();
+
+        // Ensure the we scrolled back to the top.
+        expect(scrollController.offset, 0.0);
+      });
+
+      testWidgetsOnIos('overscrolls when dragging up', (tester) async {
+        final scrollController = ScrollController();
+
+        // Pump an editor inside a CustomScrollView without enough room to display
+        // the whole content.
+        await tester
+            .createDocument() //
+            .withLongTextContent()
+            .withEditorSize(const Size(200, 200))
+            .insideCustomScrollView()
+            .withScrollController(scrollController)
+            .pump();
+
+        // Jump to the bottom.
+        scrollController.jumpTo(scrollController.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+
+        // Drag up an arbitrary amount, smaller than the editor size.
+        final dragGesture = await tester.dragByFrameCount(
+          startLocation: tester.getRect(find.byType(CustomScrollView)).bottomCenter - const Offset(0, 5),
+          totalDragOffset: const Offset(0, -100.0),
+        );
+
+        // Ensure we are overscrolling while holding the pointer down.
+        await tester.pumpAndSettle();
+        expect(scrollController.offset, greaterThan(scrollController.position.maxScrollExtent));
+
+        // Release the pointer to end the gesture.
+        await dragGesture.up();
+
+        // Wait for the long-press timer to resolve.
+        await tester.pumpAndSettle();
+
+        // Ensure the we scrolled back to the end.
+        expect(scrollController.offset, scrollController.position.maxScrollExtent);
       });
 
       group('respects horizontal scrolling', () {
@@ -682,11 +1116,155 @@ void main() {
 
           // Ensure SuperEditor has scrolled
           expect(editorScrollController.offset, greaterThan(0));
-
-          // Ensure that scrolling didn't scroll the ListView
-          expect(listScrollController.position.pixels, equals(0));
         });
       });
+
+      group("when all content fits in the viewport", () {
+        testWidgetsOnDesktop(
+          "trackpad doesn't scroll content",
+          (tester) async {
+            tester.view.physicalSize = const Size(800, 600);
+
+            final isScrollingUp = _scrollDirectionVariant.currentValue == _ScrollDirection.up;
+
+            await tester //
+                .createDocument()
+                .withCustomContent(
+                  paragraphThenHrThenParagraphDoc()
+                    ..insertNodeAt(
+                      0,
+                      ParagraphNode(
+                        id: Editor.createNodeId(),
+                        text: AttributedText('Document #1'),
+                        metadata: {
+                          'blockType': header1Attribution,
+                        },
+                      ),
+                    ),
+                )
+                .pump();
+
+            final scrollState = tester.state<ScrollableState>(find.byType(Scrollable));
+
+            // Perform a fling on the editor to attemp scrolling.
+            await tester.trackpadFling(
+              find.byType(SuperEditor),
+              Offset(0.0, isScrollingUp ? 100 : -100),
+              300,
+            );
+
+            await tester.pump();
+
+            // Ensure SuperEditor is not scrolling.
+            expect(scrollState.position.activity?.isScrolling, false);
+          },
+          variant: _scrollDirectionVariant,
+        );
+
+        testWidgetsOnDesktop(
+          "mouse scroll wheel doesn't scroll content",
+          (tester) async {
+            tester.view.physicalSize = const Size(800, 600);
+
+            final isScrollUp = _scrollDirectionVariant.currentValue == _ScrollDirection.up;
+
+            await tester //
+                .createDocument()
+                .withCustomContent(
+                  paragraphThenHrThenParagraphDoc()
+                    ..insertNodeAt(
+                      0,
+                      ParagraphNode(
+                        id: Editor.createNodeId(),
+                        text: AttributedText('Document #1'),
+                        metadata: {
+                          'blockType': header1Attribution,
+                        },
+                      ),
+                    ),
+                )
+                .pump();
+
+            final scrollState = tester.state<ScrollableState>(find.byType(Scrollable));
+
+            final Offset scrollEventLocation = tester.getCenter(find.byType(SuperEditor));
+            final TestPointer testPointer = TestPointer(1, PointerDeviceKind.mouse);
+
+            // Send initial pointer event to set the location for subsequent pointer scroll events.
+            await tester.sendEventToBinding(testPointer.hover(scrollEventLocation));
+
+            // Send pointer scroll event to start scrolling.
+            await tester.sendEventToBinding(
+              testPointer.scroll(
+                Offset(
+                  0.0,
+                  isScrollUp ? 100 : -100.0,
+                ),
+              ),
+            );
+
+            await tester.pump();
+
+            // Ensure SuperReader is not scrolling.
+            expect(scrollState.position.activity!.isScrolling, false);
+          },
+          variant: _scrollDirectionVariant,
+        );
+      });
+    });
+
+    testWidgetsOnDesktop('shows scrollbar by default', (tester) async {
+      final scrollController = ScrollController();
+      await tester //
+          .createDocument()
+          .withSingleParagraph()
+          .withEditorSize(const Size(300, 300))
+          .withScrollController(scrollController)
+          .pump();
+
+      // Ensure the editor is scrollable.
+      expect(scrollController.position.maxScrollExtent, greaterThan(0.0));
+
+      // Ensure the scrollbar is displayed.
+      expect(
+        find.descendant(
+          of: find.byType(SuperEditor),
+          matching: find.byType(ScrollbarWithCustomPhysics),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgetsOnDesktop('does not show scrollbar when ancestor ScrollConfiguration does not want one', (tester) async {
+      final scrollController = ScrollController();
+      await tester //
+          .createDocument()
+          .withSingleParagraph()
+          .withEditorSize(const Size(300, 300))
+          .withScrollController(scrollController)
+          .withCustomWidgetTreeBuilder(
+            (superEditor) => MaterialApp(
+              home: Scaffold(
+                body: ScrollConfiguration(
+                  behavior: const ScrollBehavior().copyWith(scrollbars: false),
+                  child: superEditor,
+                ),
+              ),
+            ),
+          )
+          .pump();
+
+      // Ensure the editor is scrollable.
+      expect(scrollController.position.maxScrollExtent, greaterThan(0.0));
+
+      // Ensure no scrollbar is displayed.
+      expect(
+        find.descendant(
+          of: find.byType(SuperEditor),
+          matching: find.byType(ScrollbarWithCustomPhysics),
+        ),
+        findsNothing,
+      );
     });
   });
 }
@@ -849,4 +1427,14 @@ MutableDocument _createExampleDocumentForScrolling() {
       ),
     ],
   );
+}
+
+final _scrollDirectionVariant = ValueVariant<_ScrollDirection>({
+  _ScrollDirection.up,
+  _ScrollDirection.down,
+});
+
+enum _ScrollDirection {
+  up,
+  down;
 }

@@ -239,7 +239,7 @@ MutableDocument _createInitialDocument() {
       ParagraphNode(
         id: Editor.createNodeId(),
         text: AttributedText(
-          text: 'A supercharged rich text editor for Flutter',
+          'A supercharged rich text editor for Flutter',
         ),
         metadata: {
           'blockType': header1Attribution,
@@ -249,8 +249,8 @@ MutableDocument _createInitialDocument() {
       ParagraphNode(
         id: Editor.createNodeId(),
         text: AttributedText(
-          text: 'The missing WYSIWYG editor for Flutter.',
-          spans: AttributedSpans(
+          'The missing WYSIWYG editor for Flutter.',
+          AttributedSpans(
             attributions: [
               const SpanMarker(
                 attribution: boldAttribution,
@@ -269,9 +269,8 @@ MutableDocument _createInitialDocument() {
       ParagraphNode(
         id: Editor.createNodeId(),
         text: AttributedText(
-          text:
-              'Open source and written entirely in Dart. Comes with a modular architecture that allows you to customize it to your needs.',
-          spans: AttributedSpans(
+          'Open source and written entirely in Dart. Comes with a modular architecture that allows you to customize it to your needs.',
+          AttributedSpans(
             attributions: [
               const SpanMarker(
                 attribution: _underlineAttribution,
@@ -290,7 +289,7 @@ MutableDocument _createInitialDocument() {
       ParagraphNode(
         id: Editor.createNodeId(),
         text: AttributedText(
-          text: 'Try it right here >>',
+          'Try it right here >>',
         ),
       ),
     ],
@@ -312,13 +311,13 @@ final _compactStylesheet = defaultStylesheet.copyWith(
     StyleRule(BlockSelector.all, (doc, docNode) => {'textStyle': _baseTextStyle}),
     StyleRule(
       BlockSelector.all.after(header1Attribution.name),
-      (doc, docNode) => {'padding': const CascadingPadding.only(top: 24)},
+      (doc, docNode) => {Styles.padding: const CascadingPadding.only(top: 24)},
     ),
     StyleRule(
       BlockSelector(header1Attribution.name),
       (doc, docNode) {
         return {
-          'textStyle': _baseTextStyle.copyWith(
+          Styles.textStyle: _baseTextStyle.copyWith(
             fontSize: 32,
             fontWeight: FontWeight.w700,
             height: 1.2,
@@ -328,7 +327,7 @@ final _compactStylesheet = defaultStylesheet.copyWith(
     ),
     StyleRule(BlockSelector(header2Attribution.name), (doc, docNode) {
       return {
-        'textStyle': _baseTextStyle.copyWith(
+        Styles.textStyle: _baseTextStyle.copyWith(
           fontSize: 32,
           fontWeight: FontWeight.w700,
           height: 1.2,
@@ -337,7 +336,7 @@ final _compactStylesheet = defaultStylesheet.copyWith(
     }),
     StyleRule(BlockSelector(header3Attribution.name), (doc, docNode) {
       return {
-        'textStyle': _baseTextStyle.copyWith(
+        Styles.textStyle: _baseTextStyle.copyWith(
           fontSize: 26,
           fontWeight: FontWeight.w700,
           height: 1.2,
@@ -346,7 +345,7 @@ final _compactStylesheet = defaultStylesheet.copyWith(
     }),
     StyleRule(BlockSelector(blockquoteAttribution.name), (doc, docNode) {
       return {
-        'textStyle': _baseTextStyle.copyWith(
+        Styles.textStyle: _baseTextStyle.copyWith(
           fontSize: 20,
           fontWeight: FontWeight.bold,
           color: Colors.black54,
@@ -360,16 +359,16 @@ final _compactStylesheet = defaultStylesheet.copyWith(
 final _wideStylesheet = defaultStylesheet.copyWith(
   documentPadding: const EdgeInsets.symmetric(horizontal: 54, vertical: 60),
   addRulesAfter: [
-    StyleRule(BlockSelector.all, (doc, docNode) => {'textStyle': _baseTextStyle}),
+    StyleRule(BlockSelector.all, (doc, docNode) => {Styles.textStyle: _baseTextStyle}),
     StyleRule(
       BlockSelector.all.after(header1Attribution.name),
-      (doc, docNode) => {'padding': const CascadingPadding.only(top: 48)},
+      (doc, docNode) => {Styles.padding: const CascadingPadding.only(top: 48)},
     ),
     StyleRule(
       BlockSelector(header1Attribution.name),
       (doc, docNode) {
         return {
-          'textStyle': _baseTextStyle.copyWith(
+          Styles.textStyle: _baseTextStyle.copyWith(
             fontSize: 40,
             fontWeight: FontWeight.w700,
             height: 1.2,
@@ -381,7 +380,7 @@ final _wideStylesheet = defaultStylesheet.copyWith(
       BlockSelector(header2Attribution.name),
       (doc, docNode) {
         return {
-          'textStyle': _baseTextStyle.copyWith(
+          Styles.textStyle: _baseTextStyle.copyWith(
             fontSize: 32,
             fontWeight: FontWeight.w700,
             height: 1.2,
@@ -393,7 +392,7 @@ final _wideStylesheet = defaultStylesheet.copyWith(
       BlockSelector(header3Attribution.name),
       (doc, docNode) {
         return {
-          'textStyle': _baseTextStyle.copyWith(
+          Styles.textStyle: _baseTextStyle.copyWith(
             fontSize: 36,
             fontWeight: FontWeight.w700,
             height: 1.2,
@@ -405,7 +404,7 @@ final _wideStylesheet = defaultStylesheet.copyWith(
       BlockSelector(blockquoteAttribution.name),
       (doc, docNode) {
         return {
-          'textStyle': _baseTextStyle.copyWith(
+          Styles.textStyle: _baseTextStyle.copyWith(
             fontSize: 20,
             fontWeight: FontWeight.bold,
             color: Colors.black54,

@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:logging/logging.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 
 /// Widget that displays [content] above a number of [underlays], and beneath a number of
@@ -194,7 +196,7 @@ class ContentLayersElement extends RenderObjectElement {
 
       if (isContentDirty && isAnyLayerDirty) {
         contentLayersLog.fine("Marking needs build because content and at least one layer are both dirty.");
-        _deactivateLayers();
+        _temporarilyForgetLayers();
       }
     });
   }
@@ -207,35 +209,52 @@ class ContentLayersElement extends RenderObjectElement {
 
     contentLayersLog.finer("Checking underlays");
     for (final underlay in _underlays) {
-      contentLayersLog.finer(" - Is underlay ($underlay) subtree dirty? ${_isSubtreeDirty(underlay)}");
+      contentLayersLog.finer(() => " - Is underlay ($underlay) subtree dirty? ${_isSubtreeDirty(underlay)}");
       hasDirtyElements = hasDirtyElements || _isSubtreeDirty(underlay);
     }
 
     contentLayersLog.finer("Checking overlays");
     for (final overlay in _overlays) {
-      contentLayersLog.finer(" - Is overlay ($overlay) subtree dirty? ${_isSubtreeDirty(overlay)}");
+      contentLayersLog.finer(() => " - Is overlay ($overlay) subtree dirty? ${_isSubtreeDirty(overlay)}");
       hasDirtyElements = hasDirtyElements || _isSubtreeDirty(overlay);
     }
 
     return hasDirtyElements;
   }
 
-  bool _isSubtreeDirty(Element element) {
-    contentLayersLog.finest("Finding dirty children for: $element");
-    if (element.dirty) {
-      contentLayersLog.finest("Found a dirty child: $element");
-      return true;
-    }
+  static bool _isDirty = false;
 
-    bool isDirty = false;
-    element.visitChildren((childElement) {
-      isDirty = isDirty || _isSubtreeDirty(childElement);
-    });
-    return isDirty;
+  bool _isSubtreeDirty(Element element) {
+    _isDirty = false;
+    element.visitChildren(_isSubtreeDirtyVisitor);
+    return _isDirty;
+  }
+
+// This is intentionally static to prevent closure allocation during
+  // the traversal of the element tree.
+  static void _isSubtreeDirtyVisitor(Element element) {
+    // Can't use the () => message syntax because it allocates a closure.
+    assert(() {
+      if (contentLayersLog.isLoggable(Level.FINEST)) {
+        contentLayersLog.finest("Finding dirty children for: $element");
+      }
+      return true;
+    }());
+    if (element.dirty) {
+      assert(() {
+        if (contentLayersLog.isLoggable(Level.FINEST)) {
+          contentLayersLog.finest("Found a dirty child: $element");
+        }
+        return true;
+      }());
+      _isDirty = true;
+      return;
+    }
+    element.visitChildren(_isSubtreeDirtyVisitor);
   }
 
   void _onContentBuildScheduled() {
-    _deactivateLayers();
+    _temporarilyForgetLayers();
   }
 
   @override
@@ -283,17 +302,23 @@ class ContentLayersElement extends RenderObjectElement {
     return newChild;
   }
 
-  void _deactivateLayers() {
-    contentLayersLog.finer("ContentLayersElement - deactivating layers");
+  /// Forgets the overlay and underlay children so that they don't run build at a
+  /// problematic time, but the same layers can be brought back later, with retained
+  /// `Element` and `State` objects.
+  ///
+  /// Note: If the layers are deactivated, rather than forgotten, new `Element`s and
+  /// `State`s will be created on every build, which prevents layer `State` objects
+  /// from retaining information across builds, thus defeating the purpose of using
+  /// a `StatefulWidget`.
+  void _temporarilyForgetLayers() {
+    contentLayersLog.finer("ContentLayersElement - temporarily forgetting layers");
     for (final underlay in _underlays) {
-      deactivateChild(underlay);
+      forgetChild(underlay);
     }
-    _underlays = [];
 
     for (final overlay in _overlays) {
-      deactivateChild(overlay);
+      forgetChild(overlay);
     }
-    _overlays = [];
   }
 
   @override
@@ -423,6 +448,17 @@ class RenderContentLayers extends RenderBox {
   RenderBox? _content;
   final _overlays = <RenderBox>[];
 
+  /// Whether this render object's layout information or its content
+  /// layout information is dirty.
+  ///
+  /// This is set to `true` when `markNeedsLayout` is called and it's
+  /// set to `false` after laying out the content.
+  bool get contentNeedsLayout => _contentNeedsLayout;
+  bool _contentNeedsLayout = true;
+
+  /// Whether we are at the middle of a [performLayout] call.
+  bool _runningLayout = false;
+
   @override
   void attach(PipelineOwner owner) {
     contentLayersLog.info("Attaching RenderContentLayers to owner: $owner");
@@ -444,6 +480,19 @@ class RenderContentLayers extends RenderBox {
     visitChildren((child) {
       child.detach();
     });
+  }
+
+  @override
+  void markNeedsLayout() {
+    super.markNeedsLayout();
+
+    if (_runningLayout) {
+      // We are already in a layout phase.
+      // When we call ContentLayerElement.buildLayers, markNeedsLayout is called again.
+      // We don't to mark the content as dirty, because otherwise the layers will never build.
+      return;
+    }
+    _contentNeedsLayout = true;
   }
 
   @override
@@ -572,8 +621,11 @@ class RenderContentLayers extends RenderBox {
     contentLayersLog.info("Laying out ContentLayers");
     if (_content == null) {
       size = Size.zero;
+      _contentNeedsLayout = false;
       return;
     }
+
+    _runningLayout = true;
 
     // Always layout the content first, so that layers can inspect the content layout.
     contentLayersLog.fine("Laying out content - $_content");
@@ -582,6 +634,8 @@ class RenderContentLayers extends RenderBox {
 
     // The size of the layers, and the our size, is exactly the same as the content.
     size = _content!.size;
+
+    _contentNeedsLayout = false;
 
     // Build the underlay and overlays during the layout phase so that they can inspect an
     // up-to-date content layout.
@@ -606,6 +660,8 @@ class RenderContentLayers extends RenderBox {
       contentLayersLog.fine("Laying out overlay: $overlay");
       overlay.layout(layerConstraints);
     }
+
+    _runningLayout = false;
     contentLayersLog.finer("Done laying out layers");
   }
 
@@ -717,17 +773,16 @@ typedef ContentLayerWidgetBuilder = ContentLayerWidget Function(BuildContext con
 /// Flutter's build order. This timing issue is only a concern when a layer
 /// widget inspects content layout within [ContentLayers]. However, to prevent
 /// developer confusion and mistakes, all layer widgets are forced to be
-/// a [ContentLayerWidget].
+/// [ContentLayerWidget]s.
 ///
 /// Extend [ContentLayerStatefulWidget] to create a layer that's based on the
-/// content layout within the ancestor [ContentLayers], or a layer that requires
-/// mutable state.
+/// content layout within the ancestor [ContentLayers], and requires mutable state.
 ///
-/// Extend [ContentLayerStatelessWidget] to create a layer that doesn't need to
-/// inspect the content layout within the ancestor [ContentLayers], and doesn't
-/// need mutable state.
+/// Extend [ContentLayerStatelessWidget] to create a layer that's based on the
+/// content layout within the ancestor [ContentLayers], but doesn't require mutable
+/// state.
 ///
-/// To quickly and easily build a traditional layer widget tree, create a
+/// To quickly and easily build a layer from a traditional widget tree, create a
 /// [ContentLayerProxyWidget] with the desired subtree. This approach is a
 /// quicker and more convenient alternative to [ContentLayerStatelessWidget]
 /// for the simplest of layer trees.
@@ -735,10 +790,26 @@ abstract class ContentLayerWidget implements Widget {
   // Marker interface.
 }
 
+/// A [ContentLayerWidget] that displays nothing.
+///
+/// Useful when a layer should conditionally display content. An [EmptyContentLayer] can
+/// be returned in cases where no visuals are desired.
+class EmptyContentLayer extends ContentLayerStatelessWidget {
+  const EmptyContentLayer({super.key});
+
+  @override
+  Widget doBuild(BuildContext context, Element? contentElement, RenderObject? contentLayout) {
+    return const SizedBox();
+  }
+}
+
 /// Widget that builds a [ContentLayers] layer based on a traditional widget
 /// subtree, as represented by the given [child].
 ///
 /// The [child] subtree must NOT access the content layout within [ContentLayers].
+///
+/// This widget is an escape hatch to easily display traditional widget subtrees
+/// as content layers, when those layers don't care about the layout of the content.
 class ContentLayerProxyWidget extends ContentLayerStatelessWidget {
   const ContentLayerProxyWidget({
     super.key,
@@ -748,40 +819,49 @@ class ContentLayerProxyWidget extends ContentLayerStatelessWidget {
   final Widget child;
 
   @override
-  Widget doBuild(BuildContext context, RenderObject? contentLayout) {
+  Widget doBuild(BuildContext context, Element? contentElement, RenderObject? contentLayout) {
     return child;
   }
 }
 
 /// Widget that builds a stateless [ContentLayers] layer, which is given access
-/// to the ancestor [ContentLayers] content.
+/// to the ancestor [ContentLayers] content [Element] and [RenderObject].
 abstract class ContentLayerStatelessWidget extends StatelessWidget implements ContentLayerWidget {
   const ContentLayerStatelessWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
     final contentLayers = (context as Element).findAncestorContentLayers();
-    final contentLayout = contentLayers?._content?.findRenderObject();
+    final contentElement = contentLayers?._content;
+    final contentLayout = contentElement?.findRenderObject();
 
-    return doBuild(context, contentLayout);
+    return doBuild(context, contentElement, contentLayout);
   }
 
   @protected
-  Widget doBuild(BuildContext context, RenderObject? contentLayout);
+  Widget doBuild(BuildContext context, Element? contentElement, RenderObject? contentLayout);
 }
 
-abstract class ContentLayerStatefulWidget extends StatefulWidget implements ContentLayerWidget {
+/// Widget that builds a stateful [ContentLayers] layer, which is given access
+/// to the ancestor [ContentLayers] content [Element] and [RenderObject].
+///
+/// See [ContentLayerState] for information about why a special type of [StatefulWidget]
+/// is required for use within [ContentLayers].
+abstract class ContentLayerStatefulWidget<LayoutDataType> extends StatefulWidget implements ContentLayerWidget {
   const ContentLayerStatefulWidget({super.key});
 
   @override
-  StatefulElement createElement() {
-    return ContentLayerStatefulElement(this);
-  }
+  StatefulElement createElement() => ContentLayerStatefulElement(this);
 
   @override
-  ContentLayerState createState();
+  ContentLayerState<ContentLayerStatefulWidget, LayoutDataType> createState();
 }
 
+/// A [StatefulElement] that looks for an ancestor [ContentLayersElement] and marks
+/// that element as needing to rebuild any time that this [ContentLayerStatefulElement]
+/// needs to rebuild.
+///
+/// In effect, this [Element] connects its dirty state to an ancestor [ContentLayersElement].
 class ContentLayerStatefulElement extends StatefulElement {
   ContentLayerStatefulElement(super.widget);
 
@@ -816,6 +896,8 @@ class ContentLayerStatefulElement extends StatefulElement {
 }
 
 extension on Element {
+  /// Finds and returns a [ContentLayersElement] by walking up the [Element] tree,
+  /// beginning with this [Element].
   ContentLayersElement? findAncestorContentLayers() {
     ContentLayersElement? contentLayersElement;
 
@@ -832,24 +914,57 @@ extension on Element {
   }
 }
 
+/// A state object for a [ContentLayerStatefulWidget].
+///
+/// A [ContentLayerState] needs to be implemented a little bit differently than
+/// a traditional [StatefulWidget]. Calling `setState()` will cause this widget
+/// to rebuild, but the ancestor [ContentLayers] has no control over WHEN this
+/// widget will rebuild. This widget might rebuild before the content layer can
+/// run its layout. If this widget then attempts to query the content layout,
+/// Flutter throws an exception.
+///
+/// To work around the rebuild timing issues, a [ContentLayerState] separates
+/// layout inspection from the build process. A [ContentLayerState] should
+/// collect all the layout information it needs in [computeLayoutData] and then
+/// it should build its subtree in [doBuild].
+///
+/// A [ContentLayerState] should NOT implement [build] - that implementation is
+/// handled on your behalf, and it coordinates between [computeLayoutData] and
+/// [doBuild].
 abstract class ContentLayerState<WidgetType extends ContentLayerStatefulWidget, LayoutDataType>
     extends State<WidgetType> {
+  @protected
+  LayoutDataType? get layoutData => _layoutData;
   LayoutDataType? _layoutData;
 
+  /// Traditional build method for this widget - this method should not be overridden
+  /// in subclasses.
   @override
   Widget build(BuildContext context) {
     final contentLayers = (context as Element).findAncestorContentLayers();
-    final contentLayout = contentLayers?._content?.findRenderObject();
+    final contentElement = contentLayers?._content;
+    final contentLayout = contentElement?.findRenderObject();
 
-    if (contentLayers != null && !contentLayers.renderObject._content!.debugNeedsLayout) {
-      _layoutData = computeLayoutData(contentLayout);
+    if (contentLayers != null && !contentLayers.renderObject.contentNeedsLayout) {
+      _layoutData = computeLayoutData(contentElement, contentLayout);
     }
 
     return doBuild(context, _layoutData);
   }
 
-  LayoutDataType? computeLayoutData(RenderObject? contentLayout);
+  /// Computes and returns cached layout data, derived from the content layer's [Element]
+  /// and [RenderObject].
+  ///
+  /// Subclasses can choose what action to take when the [contentElement] or [contentLayout]
+  /// are `null`, and therefore unavailable.
+  LayoutDataType? computeLayoutData(Element? contentElement, RenderObject? contentLayout);
 
+  /// Composes and returns the subtree for this widget.
+  ///
+  /// This method should be treated as the replacement for the traditional [build] method.
+  ///
+  /// [doBuild] is provided with the latest available layout data, which was computed
+  /// by [computeLayoutData].
   @protected
   Widget doBuild(BuildContext context, LayoutDataType? layoutData);
 }

@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:super_editor/src/test/flutter_extensions/finders.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_text_layout/super_text_layout.dart';
 
@@ -51,16 +53,6 @@ class SuperReaderInspector {
     return alignment.withinRect(rect);
   }
 
-  /// Returns the (x,y) offset for a caret, if that caret appeared at the given [position].
-  ///
-  /// {@macro super_document_finder}
-  static Offset calculateOffsetForCaret(DocumentPosition position, [Finder? finder]) {
-    final documentLayout = _findDocumentLayout(finder);
-    final positionRect = documentLayout.getRectForPosition(position);
-    assert(positionRect != null);
-    return positionRect!.topLeft;
-  }
-
   /// Returns `true` if the entire content rectangle at [position] is visible on
   /// screen, or `false` otherwise.
   ///
@@ -106,6 +98,24 @@ class SuperReaderInspector {
     return (documentLayout.getComponentByNodeId(nodeId) as TextComponentState).widget.text;
   }
 
+  /// Finds the paragraph with the given [nodeId] and returns the paragraph's content as a [TextSpan].
+  ///
+  /// A [TextSpan] is the fundamental way that Flutter styles text. It's the lowest level reflection
+  /// of what the user will see, short of rendering the actual UI.
+  ///
+  /// {@macro super_reader_finder}
+  static TextSpan findRichTextInParagraph(String nodeId, [Finder? superReaderFinder]) {
+    final documentLayout = _findDocumentLayout(superReaderFinder);
+
+    final textComponentState = documentLayout.getComponentByNodeId(nodeId) as TextComponentState;
+    final superText = find
+        .descendant(of: find.byWidget(textComponentState.widget), matching: find.byType(SuperText))
+        .evaluate()
+        .single
+        .widget as SuperText;
+    return superText.richText as TextSpan;
+  }
+
   /// Finds and returns the [TextStyle] that's applied to the top-level of the [TextSpan]
   /// in the paragraph with the given [nodeId].
   ///
@@ -114,12 +124,12 @@ class SuperReaderInspector {
     final documentLayout = _findDocumentLayout(superDocumentFinder);
 
     final textComponentState = documentLayout.getComponentByNodeId(nodeId) as TextComponentState;
-    final superTextWithSelection = find
-        .descendant(of: find.byWidget(textComponentState.widget), matching: find.byType(SuperTextWithSelection))
+    final superText = find
+        .descendant(of: find.byWidget(textComponentState.widget), matching: find.byType(SuperText))
         .evaluate()
         .single
-        .widget as SuperTextWithSelection;
-    return superTextWithSelection.richText.style;
+        .widget as SuperText;
+    return superText.richText.style;
   }
 
   /// Returns the [DocumentNode] at given the [index].
@@ -159,6 +169,187 @@ class SuperReaderInspector {
     }
     final documentLayoutElement = layoutFinder.evaluate().single as StatefulElement;
     return documentLayoutElement.state as DocumentLayout;
+  }
+
+  /// Returns `true` if [SuperReader]'s policy believes that a mobile toolbar should
+  /// be visible right now, or `false` otherwise.
+  ///
+  /// This inspection is different from [isMobileToolbarVisible] in a couple ways:
+  ///  * On mobile web, [SuperReader] defers to the browser's built-in overlay
+  ///    controls. Therefore, [wantsMobileToolbarToBeVisible] is `true` but
+  ///    [isMobileToolbarVisible] is `false`.
+  ///  * When an app customizes the toolbar, [SuperReader] might want to build
+  ///    and display a toolbar, but the app overrode the toolbar widget and chose
+  ///    to build empty space instead of a toolbar. In this case
+  ///    [wantsMobileToolbarToBeVisible] is `true`, but [isMobileToolbarVisible]
+  ///    is `false`.
+  static bool wantsMobileToolbarToBeVisible([Finder? superReaderFinder]) {
+    // TODO: add Android support
+    final toolbarManager = find.state<SuperReaderIosToolbarOverlayManagerState>(superReaderFinder);
+    if (toolbarManager == null) {
+      throw Exception(
+          "Tried to verify that SuperReader wants mobile toolbar to be visible, but couldn't find the toolbar manager widget.");
+    }
+
+    return toolbarManager.wantsToDisplayToolbar;
+  }
+
+  /// Returns `true` if the mobile floating toolbar is currently visible, or `false`
+  /// if it's not.
+  ///
+  /// The mobile floating toolbar looks different for iOS and Android, but on both
+  /// platforms it appears on top of the editor, near selected content.
+  ///
+  /// This method doesn't take a `superReaderFinder` because the toolbar is displayed
+  /// in the application overlay, and is therefore completely independent from the
+  /// [SuperReader] subtree. There's no obvious way to associate a toolbar with
+  /// a specific [SuperReader].
+  ///
+  /// See also: [wantsMobileToolbarToBeVisible].
+  static bool isMobileToolbarVisible() {
+    return find.byKey(DocumentKeys.mobileToolbar).evaluate().isNotEmpty;
+  }
+
+  /// Returns `true` if [SuperReader]'s policy believes that a mobile magnifier
+  /// should be visible right now, or `false` otherwise.
+  ///
+  /// This inspection is different from [isMobileMagnifierVisible] in a couple ways:
+  ///  * On mobile web, [SuperReader] defers to the browser's built-in overlay
+  ///    controls. Therefore, [wantsMobileMagnifierToBeVisible] is `true` but
+  ///    [isMobileMagnifierVisible] is `false`.
+  ///  * When an app customizes the magnifier, [SuperReader] might want to build
+  ///    and display a magnifier, but the app overrode the magnifier widget and chose
+  ///    to build empty space instead of a magnifier. In this case
+  ///    [wantsMobileMagnifierToBeVisible] is `true`, but [isMobileMagnifierVisible]
+  ///    is `false`.
+  static bool wantsMobileMagnifierToBeVisible([Finder? superReaderFinder]) {
+    // TODO: add Android support
+    final magnifierManager = find.state<SuperReaderIosMagnifierOverlayManagerState>(superReaderFinder);
+    if (magnifierManager == null) {
+      throw Exception(
+          "Tried to verify that SuperReader wants mobile magnifier to be visible, but couldn't find the magnifier manager widget.");
+    }
+
+    return magnifierManager.wantsToDisplayMagnifier;
+  }
+
+  /// Returns `true` if a mobile magnifier is currently visible, or `false` if it's
+  /// not.
+  ///
+  /// The mobile magnifier looks different for iOS and Android. The magnifier also
+  /// follows different focal points depending on whether it's iOS or Android.
+  /// But in both cases, a magnifier is a small shape near the user's finger or
+  /// selection, which shows the editor content at an enlarged/magnified level.
+  ///
+  /// This method doesn't take a `superReaderFinder` because the magnifier is displayed
+  /// in the application overlay, and is therefore completely independent from the
+  /// [SuperReader] subtree. There's no obvious way to associate a magnifier with
+  /// a specific [SuperReader].
+  ///
+  /// See also: [wantsMobileMagnifierToBeVisible]
+  static bool isMobileMagnifierVisible() {
+    return find.byKey(DocumentKeys.magnifier).evaluate().isNotEmpty;
+  }
+
+  /// Returns `true` if any type of mobile drag handles are visible, or `false`
+  /// if not.
+  ///
+  /// On iOS, drag handles include the caret, as well as the upstream and downstream
+  /// handles.
+  ///
+  /// On Android, drag handles include the caret handle, as well as the upstream and
+  /// downstream drag handles. The caret drag handle on Android disappears after a brief
+  /// period of inactivity, and reappears upon another user interaction.
+  static Finder findAllMobileDragHandles([Finder? superReaderFinder]) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return find.byWidgetPredicate(
+          (widget) =>
+              widget.key == DocumentKeys.androidCaretHandle ||
+              widget.key == DocumentKeys.upstreamHandle ||
+              widget.key == DocumentKeys.downstreamHandle,
+        );
+      case TargetPlatform.iOS:
+        return find.byWidgetPredicate(
+          (widget) =>
+              widget.key == DocumentKeys.caret ||
+              widget.key == DocumentKeys.upstreamHandle ||
+              widget.key == DocumentKeys.downstreamHandle,
+        );
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return FindsNothing();
+    }
+  }
+
+  static Finder findMobileCaret([Finder? superReaderFinder]) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return find.byKey(DocumentKeys.caret);
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return FindsNothing();
+    }
+  }
+
+  static Finder findMobileCaretDragHandle([Finder? superReaderFinder]) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return find.byKey(DocumentKeys.androidCaretHandle);
+      case TargetPlatform.iOS:
+        return find.byKey(DocumentKeys.caret);
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return FindsNothing();
+    }
+  }
+
+  static Finder findMobileExpandedDragHandles([Finder? superReaderFinder]) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return find.byWidgetPredicate(
+          (widget) => widget.key == DocumentKeys.upstreamHandle || widget.key == DocumentKeys.downstreamHandle,
+        );
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return FindsNothing();
+    }
+  }
+
+  static Finder findMobileUpstreamDragHandle([Finder? superReaderFinder]) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return find.byKey(DocumentKeys.upstreamHandle);
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return FindsNothing();
+    }
+  }
+
+  static Finder findMobileDownstreamDragHandle([Finder? superReaderFinder]) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return find.byKey(DocumentKeys.downstreamHandle);
+      case TargetPlatform.macOS:
+      case TargetPlatform.windows:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return FindsNothing();
+    }
   }
 
   SuperReaderInspector._();

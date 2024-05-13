@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:super_editor/src/infrastructure/content_layers.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
@@ -495,7 +494,7 @@ class _SizeValidatingLayer extends ContentLayerStatefulWidget {
 
 class _SizeValidatingLayerState extends ContentLayerState<_SizeValidatingLayer, Object> {
   @override
-  Object? computeLayoutData(RenderObject? contentLayout) => null;
+  Object? computeLayoutData(Element? contentElement, RenderObject? contentLayout) => null;
 
   @override
   Widget doBuild(BuildContext context, Object? layoutData) {
@@ -543,8 +542,10 @@ class _RebuildableWidget extends StatefulWidget {
     Key? key,
     this.rebuildSignal,
     this.buildTracker,
+    // ignore: unused_element
     this.elementTracker,
     this.onBuildScheduled,
+    // ignore: unused_element
     this.onBuild,
     this.builder,
     this.child,
@@ -639,6 +640,7 @@ class _RebuildableContentLayerWidget extends ContentLayerStatefulWidget {
     this.rebuildSignal,
     this.buildTracker,
     this.elementTracker,
+    // ignore: unused_element
     this.onBuildScheduled,
     this.onBuild,
     this.builder,
@@ -717,7 +719,7 @@ class _RebuildableContentLayerWidgetState extends ContentLayerState<_Rebuildable
   }
 
   @override
-  Object? computeLayoutData(RenderObject? contentLayout) => null;
+  Object? computeLayoutData(Element? contentElement, RenderObject? contentLayout) => null;
 
   @override
   Widget doBuild(BuildContext context, Object? object) {

@@ -10,7 +10,7 @@ import 'package:super_editor/src/default_editor/document_scrollable.dart';
 import 'package:super_editor/src/document_operations/selection_operations.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/document_gestures_interaction_overrides.dart';
-import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
 import 'package:super_editor/src/infrastructure/multi_tap_gesture.dart';
 
 import 'reader_context.dart';
@@ -140,9 +140,9 @@ class _ReadOnlyDocumentMouseInteractorState extends State<ReadOnlyDocumentMouseI
     return _docLayout.getDocumentOffsetFromAncestorOffset(globalOffset);
   }
 
-  bool get _isShiftPressed => (RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-      RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shiftRight) ||
-      RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shift));
+  bool get _isShiftPressed => (HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight) ||
+      HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shift));
 
   void _onSelectionChange() {
     if (mounted) {
@@ -185,7 +185,6 @@ class _ReadOnlyDocumentMouseInteractorState extends State<ReadOnlyDocumentMouseI
   }
 
   void _onMouseMove(PointerHoverEvent event) {
-    _cancelScrollMomentum();
     _updateMouseCursor(event.position);
     _lastHoverOffset = event.position;
   }
@@ -464,13 +463,6 @@ class _ReadOnlyDocumentMouseInteractorState extends State<ReadOnlyDocumentMouseI
     _updateDragSelection();
   }
 
-  /// Beginning with Flutter 3.3.3, we are responsible for starting and
-  /// stopping scroll momentum. This method cancels any scroll momentum
-  /// in our scroll controller.
-  void _cancelScrollMomentum() {
-    widget.autoScroller.goIdle();
-  }
-
   void _updateDragSelection() {
     if (_dragEndGlobal == null) {
       // User isn't dragging. No need to update drag selection.
@@ -508,8 +500,6 @@ Updating drag selection:
     return Listener(
       onPointerHover: _onMouseMove,
       onPointerSignal: _scrollOnMouseWheel,
-      onPointerDown: (event) => _cancelScrollMomentum(),
-      onPointerPanZoomStart: (event) => _cancelScrollMomentum(),
       child: _buildCursorStyle(
         child: _buildGestureInput(
           child: _buildDocumentContainer(

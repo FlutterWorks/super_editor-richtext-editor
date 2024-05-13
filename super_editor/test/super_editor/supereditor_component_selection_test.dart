@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -549,30 +548,16 @@ Future<void> _pumpEditorWithUnselectableHrsAndFakeToolbar(
   WidgetTester tester, {
   required GlobalKey toolbarKey,
 }) async {
-  final document = paragraphThenHrThenParagraphDoc();
-  final composer = MutableDocumentComposer();
-  final editor = createDefaultDocumentEditor(document: document, composer: composer);
-
-  await tester.pumpWidget(
-    MaterialApp(
-      home: Scaffold(
-        body: SuperEditor(
-          editor: editor,
-          document: document,
-          composer: composer,
-          gestureMode: debugDefaultTargetPlatformOverride == TargetPlatform.android
-              ? DocumentGestureMode.android
-              : DocumentGestureMode.iOS,
-          androidToolbarBuilder: (_) => SizedBox(key: toolbarKey),
-          iOSToolbarBuilder: (_) => SizedBox(key: toolbarKey),
-          componentBuilders: [
-            const _UnselectableHrComponentBuilder(),
-            ...defaultComponentBuilders,
-          ],
-        ),
-      ),
-    ),
-  );
+  await tester //
+      .createDocument()
+      .withCustomContent(paragraphThenHrThenParagraphDoc())
+      .withComponentBuilders(const [
+        _UnselectableHrComponentBuilder(),
+        ...defaultComponentBuilders,
+      ])
+      .withAndroidToolbarBuilder((context, mobileToolbarKey, focalPoint) => SizedBox(key: toolbarKey))
+      .withiOSToolbarBuilder((context, mobileToolbarKey, focalPoint) => SizedBox(key: toolbarKey))
+      .pump();
 }
 
 /// SuperEditor [ComponentBuilder] that builds a horizontal rule that is
@@ -610,12 +595,14 @@ class _UnselectableHorizontalRuleComponent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BoxComponent(
-      key: componentKey,
-      isVisuallySelectable: false,
-      child: const Divider(
-        color: Color(0xFF000000),
-        thickness: 1.0,
+    return IgnorePointer(
+      child: BoxComponent(
+        key: componentKey,
+        isVisuallySelectable: false,
+        child: const Divider(
+          color: Color(0xFF000000),
+          thickness: 1.0,
+        ),
       ),
     );
   }
@@ -625,7 +612,7 @@ final _testStylesheet = defaultStylesheet.copyWith(
   addRulesAfter: [
     StyleRule(BlockSelector.all, (doc, node) {
       return {
-        "textStyle": const TextStyle(
+        Styles.textStyle: const TextStyle(
           fontSize: 12,
         ),
       };

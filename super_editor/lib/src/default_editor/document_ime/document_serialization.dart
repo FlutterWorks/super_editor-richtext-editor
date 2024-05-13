@@ -24,7 +24,12 @@ class DocumentImeSerializer {
     this._doc,
     this.selection,
     this.composingRegion, [
-    this._prependedCharacterPolicy = PrependedCharacterPolicy.automatic,
+    // Always prepend the placeholder characters because
+    // changing the editing value when the IME is composing
+    // causes the IME composition to restart.
+    //
+    // See https://github.com/superlistapp/super_editor/issues/1641 for details.
+    this._prependedCharacterPolicy = PrependedCharacterPolicy.include,
   ]) {
     _serialize();
   }
@@ -87,14 +92,14 @@ class DocumentImeSerializer {
 
       // Cache mappings between the IME text range and the document position
       // so that we can easily convert between the two, when requested.
-      final imeRange = TextRange(start: characterCount, end: characterCount + node.text.text.length);
+      final imeRange = TextRange(start: characterCount, end: characterCount + node.text.length);
       editorImeLog.finer("IME range $imeRange -> text node content '${node.text.text}'");
       imeRangesToDocTextNodes[imeRange] = node.id;
       docTextNodesToImeRanges[node.id] = imeRange;
 
       // Concatenate this node's text with the previous nodes.
       buffer.write(node.text.text);
-      characterCount += node.text.text.length;
+      characterCount += node.text.length;
     }
 
     imeText = buffer.toString();
@@ -219,6 +224,42 @@ class DocumentImeSerializer {
         isUpstream: false,
       ),
     );
+  }
+
+  /// Returns `true` if the [imePosition] is inside the prepended placeholder,
+  /// or `false` otherwise.
+  ///
+  /// The placeholder is a sequence of characters that are sent to the IME, but are
+  /// invisible to the user.
+  bool isPositionInsidePlaceholder(TextPosition imePosition) {
+    if (!didPrependPlaceholder) {
+      return false;
+    }
+
+    if (imePosition.offset <= -1) {
+      // The given imePosition might be a selection or a composing region.
+      // The IME composing position always has a value. When the IME wants
+      // to describe the absence of a composing region, the offset is set to -1.
+      // Therefore, this position refers to the absence of a composing region, so
+      // this position isn't sitting in the placeholder.
+      return false;
+    }
+
+    if (imePosition.offset >= _prependedPlaceholder.length) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /// Returns the first visible position in the IME content.
+  ///
+  /// If a placeholder is prepended, returns the first position after the placeholder,
+  /// otherwise, returns the first position.
+  TextPosition get firstVisiblePosition {
+    return didPrependPlaceholder //
+        ? TextPosition(offset: _prependedPlaceholder.length)
+        : const TextPosition(offset: 0);
   }
 
   DocumentPosition _imeToDocumentPosition(TextPosition imePosition, {required bool isUpstream}) {
@@ -411,7 +452,7 @@ class DocumentImeSerializer {
 
       if (_doc.getNodeAt(restrictedEndNodeIndex) is TextNode) {
         restrictedEndNode = _doc.getNodeAt(restrictedEndNodeIndex);
-        restrictedEndPosition = TextNodePosition(offset: (restrictedEndNode as TextNode).text.text.length);
+        restrictedEndPosition = TextNodePosition(offset: (restrictedEndNode as TextNode).text.length);
       }
     }
 

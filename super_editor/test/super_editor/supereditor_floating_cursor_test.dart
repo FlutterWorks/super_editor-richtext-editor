@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
+import 'package:super_editor/src/core/document.dart';
+import 'package:super_editor/src/core/document_selection.dart';
+import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/blinking_caret.dart';
+import 'package:super_editor/src/test/ime.dart';
 import 'package:super_editor/src/test/super_editor_test/supereditor_inspector.dart';
 import 'package:super_editor/src/test/super_editor_test/supereditor_robot.dart';
 
@@ -134,6 +140,92 @@ void main() {
         // changed to true, change this test to check for the default
         // M3 theme's primary color's value, Color(0xff6750a4).
         expect(caret.color, Theme.of(tester.firstElement(_caretFinder())).primaryColor);
+      });
+
+      testWidgetsOnIos('collapses an expanded selection', (tester) async {
+        final testContext = await tester //
+            .createDocument()
+            .fromMarkdown('This is a paragraph')
+            .pump();
+
+        final nodeId = testContext.document.nodes.first.id;
+
+        // Double tap to select the word "This"
+        await tester.doubleTapInParagraph(nodeId, 0);
+
+        // Ensure the word is selected.
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection(
+            base: DocumentPosition(
+              nodeId: nodeId,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+            extent: DocumentPosition(
+              nodeId: nodeId,
+              nodePosition: const TextNodePosition(offset: 4),
+            ),
+          ),
+        );
+
+        // Show the floating cursor.
+        await tester.startFloatingCursorGesture();
+        await tester.pump();
+
+        // Ensure the selection collapsed.
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: nodeId,
+              nodePosition: const TextNodePosition(offset: 4),
+            ),
+          ),
+        );
+      });
+
+      testWidgetsOnIos('moves selection between paragraphs', (tester) async {
+        final testContext = await tester //
+            .createDocument()
+            .fromMarkdown('''
+This is the first paragraph
+
+Second paragraph''') //
+            .pump();
+
+        // Place the caret at the end of the first paragraph.
+        await tester.placeCaretInParagraph(testContext.document.nodes.first.id, 27);
+
+        // Show the floating cursor.
+        await tester.startFloatingCursorGesture();
+        await tester.pump();
+
+        // Move the floating cursor down to the next paragraph.
+        await tester.updateFloatingCursorGesture(const Offset(0, 30));
+        await tester.pump();
+
+        // Simulate iOS IME generating deltas as a result of moving the floating cursor.
+        // At this point, the selection already changed to the second paragraph, which is
+        // smaller than the selection offset reported in the delta.
+        await tester.ime.sendDeltas([
+          const TextEditingDeltaNonTextUpdate(
+            oldText: 'This is the first paragraph',
+            selection: TextSelection.collapsed(offset: 27),
+            composing: TextRange.empty,
+          )
+        ], getter: imeClientGetter);
+        await tester.pump();
+
+        // Ensure the selection changed to the end of the second paragraph.
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: testContext.document.nodes.last.id,
+              nodePosition: const TextNodePosition(offset: 16, affinity: TextAffinity.upstream),
+            ),
+          ),
+        );
       });
     });
   });

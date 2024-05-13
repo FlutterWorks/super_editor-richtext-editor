@@ -9,6 +9,7 @@ import 'package:super_editor/super_editor_test.dart';
 import 'package:super_editor_markdown/super_editor_markdown.dart';
 import 'package:text_table/text_table.dart';
 
+import '../test_tools_user_input.dart';
 import 'test_documents.dart';
 
 /// Extensions on [WidgetTester] that configure and pump [SuperEditor]
@@ -155,6 +156,27 @@ class TestSuperEditorConfigurator {
     return this;
   }
 
+  /// Configures the [SuperEditor] with the given selection [styles], which dictate the color of the
+  /// primary user's selection, and related selection details.
+  TestSuperEditorConfigurator withSelectionStyles(SelectionStyles? styles) {
+    _config.selectionStyles = styles;
+    return this;
+  }
+
+  TestSuperEditorConfigurator withCaretPolicies({
+    bool? displayCaretWithExpandedSelection,
+  }) {
+    if (displayCaretWithExpandedSelection != null) {
+      _config.displayCaretWithExpandedSelection = displayCaretWithExpandedSelection;
+    }
+    return this;
+  }
+
+  TestSuperEditorConfigurator withCaretStyle({CaretStyle? caretStyle}) {
+    _config.caretStyle = caretStyle;
+    return this;
+  }
+
   /// Configures the [SuperEditor]'s [SoftwareKeyboardController].
   TestSuperEditorConfigurator withSoftwareKeyboardController(SoftwareKeyboardController controller) {
     _config.softwareKeyboardController = controller;
@@ -239,13 +261,13 @@ class TestSuperEditorConfigurator {
   }
 
   /// Configures the [SuperEditor] to use the given [builder] as its android toolbar builder.
-  TestSuperEditorConfigurator withAndroidToolbarBuilder(WidgetBuilder? builder) {
+  TestSuperEditorConfigurator withAndroidToolbarBuilder(DocumentFloatingToolbarBuilder? builder) {
     _config.androidToolbarBuilder = builder;
     return this;
   }
 
   /// Configures the [SuperEditor] to use the given [builder] as its iOS toolbar builder.
-  TestSuperEditorConfigurator withiOSToolbarBuilder(WidgetBuilder? builder) {
+  TestSuperEditorConfigurator withiOSToolbarBuilder(DocumentFloatingToolbarBuilder? builder) {
     _config.iOSToolbarBuilder = builder;
     return this;
   }
@@ -294,6 +316,24 @@ class TestSuperEditorConfigurator {
     return this;
   }
 
+  /// Configures the [SuperEditor] to be displayed inside a [CustomScrollView].
+  ///
+  /// The [CustomScrollView] is constrained by the size provided in [withEditorSize].
+  ///
+  /// Use [withScrollController] to define the [ScrollController] of the [CustomScrollView].
+  TestSuperEditorConfigurator insideCustomScrollView() {
+    _config.insideCustomScrollView = true;
+    return this;
+  }
+
+  /// Configures the [SuperEditor] to use the given [tapRegionGroupId].
+  ///
+  /// This DOESN'T wrap the editor with a [TapRegion].
+  TestSuperEditorConfigurator withTapRegionGroupId(String? tapRegionGroupId) {
+    _config.tapRegionGroupId = tapRegionGroupId;
+    return this;
+  }
+
   /// Pumps a [SuperEditor] widget tree with the desired configuration, and returns
   /// a [TestDocumentContext], which includes the artifacts connected to the widget
   /// tree, e.g., the [DocumentEditor], [DocumentComposer], etc.
@@ -326,7 +366,9 @@ class TestSuperEditorConfigurator {
   ConfiguredSuperEditorWidget _build([TestDocumentContext? testDocumentContext]) {
     final context = testDocumentContext ?? _createTestDocumentContext();
     final superEditor = _buildConstrainedContent(
-      _buildSuperEditor(context),
+      _buildAncestorScrollable(
+        child: _buildSuperEditor(context),
+      ),
     );
 
     return ConfiguredSuperEditorWidget(
@@ -368,6 +410,13 @@ class TestSuperEditorConfigurator {
     }
     return MaterialApp(
       theme: _config.appTheme,
+      // By default, Flutter chooses the shortcuts based on the platform. For "native" platforms,
+      // the defaults already work correctly, because we set `debugDefaultTargetPlatformOverride` to force
+      // the desired platform. However, for web Flutter checks for `kIsWeb`, which we can't control.
+      //
+      // Use our own version of the shortcuts, so we can set `debugIsWebOverride` to `true` to force
+      // Flutter to pick the web shortcuts.
+      shortcuts: defaultFlutterShortcuts,
       home: Scaffold(
         body: superEditor,
       ),
@@ -390,40 +439,159 @@ class TestSuperEditorConfigurator {
     return superEditor;
   }
 
+  /// Places [child] inside a [CustomScrollView], based on configurations in this class.
+  Widget _buildAncestorScrollable({required Widget child}) {
+    if (!_config.insideCustomScrollView) {
+      return child;
+    }
+
+    return CustomScrollView(
+      controller: _config.scrollController,
+      slivers: [
+        SliverToBoxAdapter(
+          child: child,
+        ),
+      ],
+    );
+  }
+
   /// Builds a [SuperEditor] widget based on the configuration of the given
   /// [testDocumentContext], as well as other configurations in this class.
   Widget _buildSuperEditor(TestDocumentContext testDocumentContext) {
-    return SuperEditor(
-      key: _config.key,
-      focusNode: testDocumentContext.focusNode,
-      editor: testDocumentContext.editor,
-      document: testDocumentContext.document,
-      composer: testDocumentContext.composer,
-      documentLayoutKey: testDocumentContext.layoutKey,
-      inputSource: _config.inputSource,
-      selectionPolicies: _config.selectionPolicies ?? const SuperEditorSelectionPolicies(),
-      softwareKeyboardController: _config.softwareKeyboardController,
-      imePolicies: _config.imePolicies ?? const SuperEditorImePolicies(),
-      imeConfiguration: _config.imeConfiguration,
-      imeOverrides: _config.imeOverrides,
-      keyboardActions: [
-        ..._config.prependedKeyboardActions,
-        ...(_config.inputSource == TextInputSource.ime ? defaultImeKeyboardActions : defaultKeyboardActions),
-        ..._config.appendedKeyboardActions,
-      ],
-      selectorHandlers: _config.selectorHandlers,
-      gestureMode: _config.gestureMode,
-      androidToolbarBuilder: _config.androidToolbarBuilder,
-      iOSToolbarBuilder: _config.iOSToolbarBuilder,
-      stylesheet: _config.stylesheet,
-      componentBuilders: [
-        ..._config.addedComponents,
-        ...(_config.componentBuilders ?? defaultComponentBuilders),
-      ],
-      autofocus: _config.autoFocus,
-      scrollController: _config.scrollController,
-      plugins: _config.plugins,
+    return _TestSuperEditor(
+      testDocumentContext: testDocumentContext,
+      testConfiguration: _config,
     );
+  }
+}
+
+class _TestSuperEditor extends StatefulWidget {
+  const _TestSuperEditor({
+    required this.testDocumentContext,
+    required this.testConfiguration,
+  });
+
+  final TestDocumentContext testDocumentContext;
+  final SuperEditorTestConfiguration testConfiguration;
+
+  @override
+  State<_TestSuperEditor> createState() => _TestSuperEditorState();
+}
+
+class _TestSuperEditorState extends State<_TestSuperEditor> {
+  late final SuperEditorIosControlsController? _iOsControlsController;
+  late final SuperEditorAndroidControlsController? _androidControlsController;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _iOsControlsController = SuperEditorIosControlsController(
+      toolbarBuilder: widget.testConfiguration.iOSToolbarBuilder,
+    );
+    _androidControlsController = SuperEditorAndroidControlsController(
+      toolbarBuilder: widget.testConfiguration.androidToolbarBuilder,
+    );
+  }
+
+  @override
+  void dispose() {
+    _iOsControlsController?.dispose();
+    _androidControlsController?.dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget testSuperEditor = _buildSuperEditor();
+
+    if (_iOsControlsController != null) {
+      testSuperEditor = SuperEditorIosControlsScope(
+        controller: _iOsControlsController!,
+        child: testSuperEditor,
+      );
+    }
+
+    if (_androidControlsController != null) {
+      testSuperEditor = SuperEditorAndroidControlsScope(
+        controller: _androidControlsController!,
+        child: testSuperEditor,
+      );
+    }
+
+    return testSuperEditor;
+  }
+
+  Widget _buildSuperEditor() {
+    return SuperEditor(
+      key: widget.testConfiguration.key,
+      focusNode: widget.testDocumentContext.focusNode,
+      autofocus: widget.testConfiguration.autoFocus,
+      tapRegionGroupId: widget.testConfiguration.tapRegionGroupId,
+      editor: widget.testDocumentContext.editor,
+      document: widget.testDocumentContext.document,
+      composer: widget.testDocumentContext.composer,
+      documentLayoutKey: widget.testDocumentContext.layoutKey,
+      inputSource: widget.testConfiguration.inputSource,
+      selectionPolicies: widget.testConfiguration.selectionPolicies ?? const SuperEditorSelectionPolicies(),
+      selectionStyle: widget.testConfiguration.selectionStyles,
+      softwareKeyboardController: widget.testConfiguration.softwareKeyboardController,
+      imePolicies: widget.testConfiguration.imePolicies ?? const SuperEditorImePolicies(),
+      imeConfiguration: widget.testConfiguration.imeConfiguration,
+      imeOverrides: widget.testConfiguration.imeOverrides,
+      keyboardActions: [
+        ...widget.testConfiguration.prependedKeyboardActions,
+        ...(widget.testConfiguration.inputSource == TextInputSource.ime
+            ? defaultImeKeyboardActions
+            : defaultKeyboardActions),
+        ...widget.testConfiguration.appendedKeyboardActions,
+      ],
+      selectorHandlers: widget.testConfiguration.selectorHandlers,
+      gestureMode: widget.testConfiguration.gestureMode,
+      stylesheet: widget.testConfiguration.stylesheet,
+      componentBuilders: [
+        ...widget.testConfiguration.addedComponents,
+        ...(widget.testConfiguration.componentBuilders ?? defaultComponentBuilders),
+      ],
+      scrollController: widget.testConfiguration.scrollController,
+      documentOverlayBuilders: _createOverlayBuilders(),
+      plugins: widget.testConfiguration.plugins,
+    );
+  }
+
+  List<SuperEditorLayerBuilder> _createOverlayBuilders() {
+    // We show the default overlays except in the cases where we want to hide the caret
+    // or use a custom `CaretStyle`. In those case, we don't include the defaults - we provide
+    // a configured caret overlay builder, instead.
+    //
+    // If you introduce further configuration to overlay builders, make sure that in the default
+    // situation, we're using `defaultSuperEditorDocumentOverlayBuilders`, so that most tests
+    // verify the defaults that most apps will use.
+    if (widget.testConfiguration.displayCaretWithExpandedSelection && widget.testConfiguration.caretStyle == null) {
+      return defaultSuperEditorDocumentOverlayBuilders;
+    }
+
+    // Copy and modify the default overlay builders
+    return [
+      // Adds a Leader around the document selection at a focal point for the
+      // iOS floating toolbar.
+      const SuperEditorIosToolbarFocalPointDocumentLayerBuilder(),
+      // Displays caret and drag handles, specifically for iOS.
+      const SuperEditorIosHandlesDocumentLayerBuilder(),
+
+      // Adds a Leader around the document selection at a focal point for the
+      // Android floating toolbar.
+      const SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder(),
+      // Displays caret and drag handles, specifically for Android.
+      const SuperEditorAndroidHandlesDocumentLayerBuilder(),
+
+      // Displays caret for typical desktop use-cases.
+      DefaultCaretOverlayBuilder(
+        displayCaretWithExpandedSelection: widget.testConfiguration.displayCaretWithExpandedSelection,
+        caretStyle: widget.testConfiguration.caretStyle ?? const CaretStyle(),
+      ),
+    ];
   }
 }
 
@@ -434,6 +602,7 @@ class SuperEditorTestConfiguration {
   Key? key;
   FocusNode? focusNode;
   bool autoFocus = false;
+  String? tapRegionGroupId;
   ui.Size? editorSize;
   final MutableDocument document;
   final addedRequestHandlers = <EditRequestHandler>[];
@@ -442,9 +611,13 @@ class SuperEditorTestConfiguration {
   List<ComponentBuilder>? componentBuilders;
   Stylesheet? stylesheet;
   ScrollController? scrollController;
+  bool insideCustomScrollView = false;
   DocumentGestureMode? gestureMode;
   TextInputSource? inputSource;
   SuperEditorSelectionPolicies? selectionPolicies;
+  SelectionStyles? selectionStyles;
+  bool displayCaretWithExpandedSelection = true;
+  CaretStyle? caretStyle;
   SoftwareKeyboardController? softwareKeyboardController;
   SuperEditorImePolicies? imePolicies;
   SuperEditorImeConfiguration? imeConfiguration;
@@ -453,8 +626,8 @@ class SuperEditorTestConfiguration {
   final prependedKeyboardActions = <DocumentKeyboardAction>[];
   final appendedKeyboardActions = <DocumentKeyboardAction>[];
   final addedComponents = <ComponentBuilder>[];
-  WidgetBuilder? androidToolbarBuilder;
-  WidgetBuilder? iOSToolbarBuilder;
+  DocumentFloatingToolbarBuilder? androidToolbarBuilder;
+  DocumentFloatingToolbarBuilder? iOSToolbarBuilder;
 
   DocumentSelection? selection;
 
@@ -665,9 +838,14 @@ class EquivalentDocumentMatcher extends Matcher {
 class FakeImageComponentBuilder implements ComponentBuilder {
   const FakeImageComponentBuilder({
     required this.size,
+    this.fillColor,
   });
 
+  /// The size of the image component.
   final ui.Size size;
+
+  /// The color that fills the entire image component.
+  final Color? fillColor;
 
   @override
   SingleColumnLayoutComponentViewModel? createViewModel(Document document, DocumentNode node) {
@@ -686,10 +864,90 @@ class FakeImageComponentBuilder implements ComponentBuilder {
       imageUrl: componentViewModel.imageUrl,
       selection: componentViewModel.selection,
       selectionColor: componentViewModel.selectionColor,
-      imageBuilder: (context, imageUrl) => SizedBox(
-        height: size.height,
-        width: size.width,
+      imageBuilder: (context, imageUrl) => ColoredBox(
+        color: fillColor ?? Colors.transparent,
+        child: SizedBox(
+          height: size.height,
+          width: size.width,
+        ),
       ),
+    );
+  }
+}
+
+/// Builds [TaskComponentViewModel]s and [ExpandingTaskComponent]s for every
+/// [TaskNode] in a document.
+class ExpandingTaskComponentBuilder extends ComponentBuilder {
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(Document document, DocumentNode node) {
+    if (node is! TaskNode) {
+      return null;
+    }
+
+    return TaskComponentViewModel(
+      nodeId: node.id,
+      padding: EdgeInsets.zero,
+      isComplete: node.isComplete,
+      setComplete: (bool isComplete) {},
+      text: node.text,
+      textStyleBuilder: noStyleBuilder,
+      selectionColor: const Color(0x00000000),
+    );
+  }
+
+  @override
+  Widget? createComponent(
+      SingleColumnDocumentComponentContext componentContext, SingleColumnLayoutComponentViewModel componentViewModel) {
+    if (componentViewModel is! TaskComponentViewModel) {
+      return null;
+    }
+
+    return ExpandingTaskComponent(
+      key: componentContext.componentKey,
+      viewModel: componentViewModel,
+    );
+  }
+}
+
+/// A task component which expands its height when it's selected.
+class ExpandingTaskComponent extends StatefulWidget {
+  const ExpandingTaskComponent({
+    super.key,
+    required this.viewModel,
+  });
+
+  final TaskComponentViewModel viewModel;
+
+  @override
+  State<ExpandingTaskComponent> createState() => _ExpandingTaskComponentState();
+}
+
+class _ExpandingTaskComponentState extends State<ExpandingTaskComponent>
+    with ProxyDocumentComponent<ExpandingTaskComponent>, ProxyTextComposable {
+  final _textKey = GlobalKey();
+
+  @override
+  GlobalKey<State<StatefulWidget>> get childDocumentComponentKey => _textKey;
+
+  @override
+  TextComposable get childTextComposable => childDocumentComponentKey.currentState as TextComposable;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextComponent(
+          key: _textKey,
+          text: widget.viewModel.text,
+          textStyleBuilder: widget.viewModel.textStyleBuilder,
+          textSelection: widget.viewModel.selection,
+          selectionColor: widget.viewModel.selectionColor,
+          highlightWhenEmpty: widget.viewModel.highlightWhenEmpty,
+        ),
+        if (widget.viewModel.selection != null) //
+          const SizedBox(height: 20)
+      ],
     );
   }
 }
@@ -712,6 +970,9 @@ class FakeDocumentLayout with Mock implements DocumentLayout {}
 /// tree with a real `Scrollable`.
 class FakeSuperEditorScroller implements DocumentScroller {
   @override
+  void dispose() {}
+
+  @override
   double get viewportDimension => throw UnimplementedError();
 
   @override
@@ -727,6 +988,9 @@ class FakeSuperEditorScroller implements DocumentScroller {
   void jumpTo(double newScrollOffset) => throw UnimplementedError();
 
   @override
+  void jumpBy(double delta) => throw UnimplementedError();
+
+  @override
   void animateTo(double to, {required Duration duration, Curve curve = Curves.easeInOut}) => throw UnimplementedError();
 
   @override
@@ -734,4 +998,10 @@ class FakeSuperEditorScroller implements DocumentScroller {
 
   @override
   void detach() => throw UnimplementedError();
+
+  @override
+  void addScrollChangeListener(ui.VoidCallback listener) => throw UnimplementedError();
+
+  @override
+  void removeScrollChangeListener(ui.VoidCallback listener) => throw UnimplementedError();
 }

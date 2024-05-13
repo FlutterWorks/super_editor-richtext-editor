@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:markdown/markdown.dart' as md;
 import 'package:super_editor/super_editor.dart';
+import 'package:super_editor_markdown/src/image_syntax.dart';
+import 'package:super_editor_markdown/super_editor_markdown.dart';
 
 import 'super_editor_syntax.dart';
 
@@ -19,16 +21,19 @@ MutableDocument deserializeMarkdownToDocument(
   MarkdownSyntax syntax = MarkdownSyntax.superEditor,
   List<md.BlockSyntax> customBlockSyntax = const [],
   List<ElementToNodeConverter> customElementToNodeConverters = const [],
+  bool encodeHtml = false,
 }) {
   final markdownLines = const LineSplitter().convert(markdown);
 
   final markdownDoc = md.Document(
     blockSyntaxes: [
       ...customBlockSyntax,
-      if (syntax == MarkdownSyntax.superEditor) //
-        _ParagraphWithAlignmentSyntax(),
-      _EmptyLinePreservingParagraphSyntax(),
-      _TaskSyntax(),
+      if (syntax == MarkdownSyntax.superEditor) ...[
+        _HeaderWithAlignmentSyntax(),
+        const _ParagraphWithAlignmentSyntax(),
+      ],
+      const _EmptyLinePreservingParagraphSyntax(),
+      const _TaskSyntax(),
     ],
   );
   final blockParser = md.BlockParser(markdownLines, markdownDoc);
@@ -37,7 +42,7 @@ MutableDocument deserializeMarkdownToDocument(
   final markdownNodes = blockParser.parseLines();
 
   // Convert structured markdown to a Document.
-  final nodeVisitor = _MarkdownToDocument(customElementToNodeConverters);
+  final nodeVisitor = _MarkdownToDocument(customElementToNodeConverters, encodeHtml, syntax);
   for (final node in markdownNodes) {
     node.accept(nodeVisitor);
   }
@@ -65,7 +70,13 @@ MutableDocument deserializeMarkdownToDocument(
 /// contains [DocumentNode]s that correspond to the visited
 /// markdown content.
 class _MarkdownToDocument implements md.NodeVisitor {
-  _MarkdownToDocument([this._elementToNodeConverters = const []]);
+  _MarkdownToDocument([
+    this._elementToNodeConverters = const [],
+    this._encodeHtml = false,
+    this.syntax = MarkdownSyntax.normal,
+  ]);
+
+  final MarkdownSyntax syntax;
 
   final List<ElementToNodeConverter> _elementToNodeConverters;
 
@@ -73,6 +84,26 @@ class _MarkdownToDocument implements md.NodeVisitor {
   List<DocumentNode> get content => _content;
 
   final _listItemTypeStack = <ListItemType>[];
+
+  /// The count of the list items currently being visited.
+  ///
+  /// Being visited means that [visitElementBefore] was called for an element and
+  /// [visitElementAfter] wasn't called yet.
+  ///
+  /// A list item might contain children with tags like `p` and `h2`. When it does,
+  /// the list item text content is inside of its children and we only generate
+  /// document nodes when we visit the list item's children.
+  ///
+  /// We track the item count because when there are sublists, [visitElementBefore] is
+  /// called for the sublist item before [visitElementAfter] is called for the
+  /// main list item.
+  int _listItemVisitedCount = 0;
+
+  /// If `true`, special HTML symbols are encoded with HTML escape codes, otherwise those
+  /// symbols are left as-is.
+  ///
+  /// Example: "&" -> "&amp;", "<" -> "&lt;", ">" -> "&gt;"
+  final bool _encodeHtml;
 
   @override
   bool visitElementBefore(md.Element element) {
@@ -82,6 +113,18 @@ class _MarkdownToDocument implements md.NodeVisitor {
         _content.add(node);
         return true;
       }
+    }
+
+    if (_listItemVisitedCount > 0 &&
+        !const ['li', 'ul', 'ol'].contains(element.tag) &&
+        (element.children == null || element.children!.isEmpty || element.children!.length == 1)) {
+      // We are visiting the text content of a list item. Add a list item node to the document.
+      _addListItem(
+        element,
+        listItemType: _listItemTypeStack.last,
+        indent: _listItemTypeStack.length - 1,
+      );
+      return false;
     }
 
     // TODO: re-organize parsing such that visitElementBefore collects
@@ -107,13 +150,19 @@ class _MarkdownToDocument implements md.NodeVisitor {
         _addHeader(element, level: 6);
         break;
       case 'p':
-        final inlineVisitor = _parseInline(element);
+        final inlineVisitor = _parseInline(element.textContent);
 
         if (inlineVisitor.isImage) {
           _addImage(
             // TODO: handle null image URL
             imageUrl: inlineVisitor.imageUrl!,
             altText: inlineVisitor.imageAltText!,
+            expectedBitmapSize: inlineVisitor.width != null || inlineVisitor.height != null
+                ? ExpectedSize(
+                    inlineVisitor.width != null ? int.tryParse(inlineVisitor.width!) : null,
+                    inlineVisitor.height != null ? int.tryParse(inlineVisitor.height!) : null,
+                  )
+                : null,
           );
         } else {
           _addParagraph(inlineVisitor.attributedText, element.attributes);
@@ -141,12 +190,25 @@ class _MarkdownToDocument implements md.NodeVisitor {
           throw Exception('Tried to parse a markdown list item but the list item type was null');
         }
 
+        // Mark that we are visiting a list item.
+        _listItemVisitedCount += 1;
+
+        if (element.children != null &&
+            element.children!.isNotEmpty &&
+            element.children!.first is! md.UnparsedContent) {
+          // The list item content is inside of its child's element. Wait until we visit
+          // the list item's children to generate a list node.
+          return true;
+        }
+
+        // We already have the content of the list item, generate a list node.
         _addListItem(
           element,
           listItemType: _listItemTypeStack.last,
           indent: _listItemTypeStack.length - 1,
         );
         break;
+
       case 'hr':
         _addHorizontalRule();
         break;
@@ -161,6 +223,9 @@ class _MarkdownToDocument implements md.NodeVisitor {
   @override
   void visitElementAfter(md.Element element) {
     switch (element.tag) {
+      case 'li':
+        _listItemVisitedCount -= 1;
+        break;
       // A list has ended. Pop the most recent list type from the stack.
       case 'ul':
       case 'ol':
@@ -197,12 +262,14 @@ class _MarkdownToDocument implements md.NodeVisitor {
         break;
     }
 
+    final textAlign = element.attributes['textAlign'];
     _content.add(
       ParagraphNode(
         id: Editor.createNodeId(),
-        text: _parseInlineText(element),
+        text: _parseInlineText(element.textContent),
         metadata: {
           'blockType': headerAttribution,
+          'textAlign': textAlign,
         },
       ),
     );
@@ -216,7 +283,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
         id: Editor.createNodeId(),
         text: attributedText,
         metadata: {
-          'textAlign': textAlign != null ? textAlign : null,
+          'textAlign': textAlign,
         },
       ),
     );
@@ -226,7 +293,7 @@ class _MarkdownToDocument implements md.NodeVisitor {
     _content.add(
       ParagraphNode(
         id: Editor.createNodeId(),
-        text: _parseInlineText(element),
+        text: _parseInlineText(element.textContent),
         metadata: {
           'blockType': blockquoteAttribution,
         },
@@ -259,12 +326,14 @@ class _MarkdownToDocument implements md.NodeVisitor {
   void _addImage({
     required String imageUrl,
     required String altText,
+    ExpectedSize? expectedBitmapSize,
   }) {
     _content.add(
       ImageNode(
         id: Editor.createNodeId(),
         imageUrl: imageUrl,
         altText: altText,
+        expectedBitmapSize: expectedBitmapSize,
       ),
     );
   }
@@ -280,12 +349,24 @@ class _MarkdownToDocument implements md.NodeVisitor {
     required ListItemType listItemType,
     required int indent,
   }) {
+    late String content;
+
+    if (element.children != null && element.children!.isNotEmpty && element.children!.first is md.UnparsedContent) {
+      // The list item might contain another sub-list. In that case, the textContent
+      // contains the text for the whole list instead of just the current list item.
+      // Use the textContent for the first child, which contains only the text
+      // of the current list item.
+      content = element.children!.first.textContent;
+    } else {
+      content = element.textContent;
+    }
+
     _content.add(
       ListItemNode(
         id: Editor.createNodeId(),
         itemType: listItemType,
         indent: indent,
-        text: _parseInlineText(element),
+        text: _parseInlineText(content),
       ),
     );
   }
@@ -294,25 +375,28 @@ class _MarkdownToDocument implements md.NodeVisitor {
     _content.add(
       TaskNode(
         id: Editor.createNodeId(),
-        text: _parseInlineText(element),
+        text: _parseInlineText(element.textContent),
         isComplete: element.attributes['completed'] == 'true',
       ),
     );
   }
 
-  AttributedText _parseInlineText(md.Element element) {
-    final inlineVisitor = _parseInline(element);
+  AttributedText _parseInlineText(String text) {
+    final inlineVisitor = _parseInline(text);
     return inlineVisitor.attributedText;
   }
 
-  _InlineMarkdownToDocument _parseInline(md.Element element) {
+  _InlineMarkdownToDocument _parseInline(String text) {
     final inlineParser = md.InlineParser(
-      element.textContent,
+      text,
       md.Document(
         inlineSyntaxes: [
           md.StrikethroughSyntax(),
           UnderlineSyntax(),
+          if (syntax == MarkdownSyntax.superEditor) //
+            SuperEditorImageSyntax(),
         ],
+        encodeHtml: _encodeHtml,
       ),
     );
     final inlineVisitor = _InlineMarkdownToDocument();
@@ -351,6 +435,12 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
   String? _imageAltText;
   String? get imageAltText => _imageAltText;
 
+  String? get width => _width;
+  String? _width;
+
+  String? get height => _height;
+  String? _height;
+
   AttributedText get attributedText => _textStack.first;
 
   final List<AttributedText> _textStack = [AttributedText()];
@@ -361,6 +451,8 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
       // TODO: handle missing "src" attribute
       _imageUrl = element.attributes['src']!;
       _imageAltText = element.attributes['alt'] ?? '';
+      _width = element.attributes['width'];
+      _height = element.attributes['height'];
       return true;
     }
 
@@ -403,7 +495,7 @@ class _InlineMarkdownToDocument implements md.NodeVisitor {
       );
     } else if (element.tag == 'a') {
       styledText.addAttribution(
-        LinkAttribution(url: Uri.parse(element.attributes['href']!)),
+        LinkAttribution.fromUri(Uri.parse(element.attributes['href']!)),
         SpanRange(0, styledText.text.length - 1),
       );
     }
@@ -435,8 +527,12 @@ class UnderlineSyntax extends md.TagSyntax {
   UnderlineSyntax() : super('¬', requiresDelimiterRun: true, allowIntraWord: true);
 
   @override
-  md.Node close(md.InlineParser parser, md.Delimiter opener, md.Delimiter closer,
-      {required List<md.Node> Function() getChildren}) {
+  md.Node? close(
+    md.InlineParser parser,
+    md.Delimiter opener,
+    md.Delimiter closer, {
+    required List<md.Node> Function() getChildren,
+  }) {
     return md.Element('u', getChildren());
   }
 }
@@ -528,7 +624,26 @@ class _EmptyLinePreservingParagraphSyntax extends md.BlockSyntax {
   bool canEndBlock(md.BlockParser parser) => false;
 
   @override
-  bool canParse(md.BlockParser parser) => !_standardNonParagraphBlockSyntaxes.any((e) => e.canParse(parser));
+  bool canParse(md.BlockParser parser) {
+    if (_standardNonParagraphBlockSyntaxes.any((e) => e.canParse(parser))) {
+      // A standard non-paragraph parser wants to parse this input. Let the other parser run.
+      return false;
+    }
+
+    if (parser.current.isEmpty) {
+      // We consider this input to be a separator between blocks because
+      // it started with an empty line. We want to parse this input.
+      return true;
+    }
+
+    if (_isAtParagraphEnd(parser, ignoreEmptyBlocks: _endsWithHardLineBreak(parser.current))) {
+      // Another parser wants to parse this input. Let the other parser run.
+      return false;
+    }
+
+    // The input is a paragraph. We want to parse it.
+    return true;
+  }
 
   @override
   md.Node? parse(md.BlockParser parser) {
@@ -604,7 +719,8 @@ class _EmptyLinePreservingParagraphSyntax extends md.BlockSyntax {
       return true;
     }
     for (final syntax in parser.blockSyntaxes) {
-      if (!(syntax is md.EmptyBlockSyntax && ignoreEmptyBlocks) &&
+      if (syntax != this &&
+          !(syntax is md.EmptyBlockSyntax && ignoreEmptyBlocks) &&
           syntax.canParse(parser) &&
           syntax.canEndBlock(parser)) {
         return true;
@@ -691,6 +807,86 @@ class _TaskSyntax extends md.BlockSyntax {
       'task',
       [md.Text(buffer.toString())],
     )..attributes['completed'] = (completionToken == 'x').toString();
+  }
+}
+
+/// Parses a header preceded by an alignment token.
+///
+/// Headers are represented by `_ParagraphWithAlignmentSyntax`s and therefore
+/// this parser must run before a [_ParagraphWithAlignmentSyntax], so that this parser
+/// can process header-specific details, such as header alignment.
+class _HeaderWithAlignmentSyntax extends md.BlockSyntax {
+  /// This pattern matches the text alignment notation.
+  ///
+  /// Possible values are `:---`, `:---:`, `---:` and `-::-`.
+  static final _alignmentNotationPattern = RegExp(r'^:-{3}|:-{3}:|-{3}:|-::-$');
+
+  /// Use internal HeaderSyntax.
+  final _headerSyntax = const md.HeaderSyntax();
+
+  @override
+  RegExp get pattern => RegExp('');
+
+  @override
+  bool canEndBlock(md.BlockParser parser) => false;
+
+  @override
+  bool canParse(md.BlockParser parser) {
+    if (!_alignmentNotationPattern.hasMatch(parser.current)) {
+      return false;
+    }
+
+    final nextLine = parser.peek(1);
+
+    // We found a match for a paragraph alignment token. However, the alignment token is the last
+    // line of content in the document. Therefore, it's not really a paragraph alignment token, and we
+    // should treat it as regular content.
+    if (nextLine == null) {
+      return false;
+    }
+
+    // Only parse if the next line is header.
+    if (!_headerSyntax.pattern.hasMatch(nextLine)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  @override
+  md.Node? parse(md.BlockParser parser) {
+    final match = _alignmentNotationPattern.firstMatch(parser.current);
+
+    // We've parsed the alignment token on the current line. We know a header starts on the
+    // next line. Move the parser to the next line so that we can parse the header.
+    parser.advance();
+
+    final headerNode = _headerSyntax.parse(parser);
+
+    if (headerNode is md.Element) {
+      headerNode.attributes.addAll({'textAlign': _convertMarkdownAlignmentTokenToSuperEditorAlignment(match!.input)});
+    }
+
+    return headerNode;
+  }
+
+  /// Converts a markdown alignment token to the textAlign metadata used to configure
+  /// the [ParagraphNode] alignment.
+  String _convertMarkdownAlignmentTokenToSuperEditorAlignment(String alignmentToken) {
+    switch (alignmentToken) {
+      case ':---':
+        return 'left';
+      case ':---:':
+        return 'center';
+      case '---:':
+        return 'right';
+      case '-::-':
+        return 'justify';
+      // As we already check that the input matches the notation,
+      // we shouldn't reach this point.
+      default:
+        return 'left';
+    }
   }
 }
 

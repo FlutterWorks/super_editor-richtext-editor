@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
@@ -101,65 +102,115 @@ void main() {
     });
 
     group('unordered list', () {
-      testWidgetsOnArbitraryDesktop('updates caret position when indenting', (tester) async {
-        await _pumpUnorderedList(tester);
+      testWidgetsOnDesktop('updates caret position when indenting', (tester) async {
+        await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemId = doc.nodes.first.id;
+        final listItemNode = doc.nodes.first as ListItemNode;
 
         // Place caret at the first list item, which has one level of indentation.
-        await tester.placeCaretInParagraph(listItemId, 0);
+        await tester.placeCaretInParagraph(listItemNode.id, 0);
 
+        // Ensure the list item has first level of indentation.
+        expect(listItemNode.indent, 0);
+
+        // Ensure the caret is initially positioned near the upstream edge of the first
+        // character of the list item.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
         final caretOffsetBeforeIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        final firstCharacterRectBeforeIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetBeforeIndent.dx, moreOrLessEquals(firstCharacterRectBeforeIndent.left, epsilon: 5));
 
         // Press tab to trigger the list indent command.
         await tester.pressTab();
 
-        // Compute the offset at which the caret should be displayed.
-        final computedOffsetAfterIndent = SuperEditorInspector.calculateOffsetForCaret(
-          DocumentPosition(
-            nodeId: listItemId,
-            nodePosition: const TextNodePosition(offset: 0),
-          ),
-        );
+        // Ensure the list item has second level of indentation.
+        expect(listItemNode.indent, 1);
 
-        // Ensure the list indentation was actually performed.
-        expect(computedOffsetAfterIndent.dx, greaterThan(caretOffsetBeforeIndent.dx));
-
-        // Ensure the caret is being displayed at the correct position.
-        expect(SuperEditorInspector.findCaretOffsetInDocument(), offsetMoreOrLessEquals(computedOffsetAfterIndent));
+        // Ensure that the caret's current offset is downstream from the initial caret offset,
+        // and also that the current caret offset is roughly positioned near the upstream edge
+        // of the first list item character.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
+        final caretOffsetAfterIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        expect(caretOffsetAfterIndent.dx, greaterThan(caretOffsetBeforeIndent.dx));
+        final firstCharacterRectAfterIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetAfterIndent.dx, moreOrLessEquals(firstCharacterRectAfterIndent.left, epsilon: 5));
       });
 
-      testWidgetsOnArbitraryDesktop('updates caret position when unindenting', (tester) async {
-        await _pumpUnorderedList(tester);
+      testWidgetsOnDesktop('updates caret position when unindenting', (tester) async {
+        await _pumpUnorderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemId = doc.nodes.last.id;
+        final listItemNode = doc.nodes.last as ListItemNode;
 
         // Place caret at the last list item, which has two levels of indentation.
         // For some reason, taping at the first character isn't displaying any caret,
         // so we put the caret at the second character and then go back one position.
-        await tester.placeCaretInParagraph(listItemId, 1);
+        await tester.placeCaretInParagraph(listItemNode.id, 1);
         await tester.pressLeftArrow();
 
-        final caretOffsetBeforeUnindent = SuperEditorInspector.findCaretOffsetInDocument();
+        // Ensure the list item has second level of indentation.
+        expect(listItemNode.indent, 1);
+
+        // Ensure the caret is initially positioned near the upstream edge of the first
+        // character of the list item.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
+        final caretOffsetBeforeUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        final firstCharacterRectBeforeUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetBeforeUnIndent.dx, moreOrLessEquals(firstCharacterRectBeforeUnIndent.left, epsilon: 5));
 
         // Press backspace to trigger the list unindent command.
         await tester.pressBackspace();
 
-        // Compute the offset at which the caret should be displayed.
-        final computedOffsetAfterUnindent = SuperEditorInspector.calculateOffsetForCaret(
-          DocumentPosition(
-            nodeId: listItemId,
-            nodePosition: const TextNodePosition(offset: 0),
-          ),
-        );
+        // Ensure the list item has first level of indentation.
+        expect(listItemNode.indent, 0);
 
-        // Ensure the list indentation was actually performed.
-        expect(computedOffsetAfterUnindent.dx, lessThan(caretOffsetBeforeUnindent.dx));
+        // Ensure that the caret's current offset is upstream from the initial caret offset,
+        // and also that the current caret offset is roughly positioned near the upstream edge
+        // of the first list item character.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
+        final caretOffsetAfterUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        expect(caretOffsetAfterUnIndent.dx, lessThan(caretOffsetBeforeUnIndent.dx));
+        final firstCharacterRectAfterUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetAfterUnIndent.dx, moreOrLessEquals(firstCharacterRectAfterUnIndent.left, epsilon: 5));
+      });
 
-        // Ensure the caret is being displayed at the correct position.
-        expect(SuperEditorInspector.findCaretOffsetInDocument(), offsetMoreOrLessEquals(computedOffsetAfterUnindent));
+      testWidgetsOnDesktop('unindents with SHIFT + TAB', (tester) async {
+        await _pumpUnorderedListWithTextField(tester);
+
+        final doc = SuperEditorInspector.findDocument()!;
+        final listItemNode = doc.nodes.last as ListItemNode;
+
+        // Place caret at the last list item, which has two levels of indentation.
+        // For some reason, taping at the first character isn't displaying any caret,
+        // so we put the caret at the second character and then go back one position.
+        await tester.placeCaretInParagraph(listItemNode.id, 1);
+        await tester.pressLeftArrow();
+
+        // Ensure the list item has second level of indentation.
+        expect(listItemNode.indent, 1);
+
+        // Press SHIFT + TAB to trigger the list unindent command.
+        await _pressShiftTab(tester);
+
+        // Ensure the list item has first level of indentation.
+        expect(listItemNode.indent, 0);
       });
 
       testWidgetsOnAllPlatforms("inserts new item on ENTER at end of existing item", (tester) async {
@@ -171,7 +222,18 @@ void main() {
         final document = context.findEditContext().document;
 
         // Place the caret at the end of the list item.
-        await tester.placeCaretInParagraph(document.nodes.first.id, 6);
+        await tester.placeCaretInParagraph(document.nodes.last.id, 6);
+
+        // Type at the end of the list item to generate a composing region,
+        // simulating the Samsung keyboard.
+        await tester.typeImeText('2');
+        await tester.ime.sendDeltas(const [
+          TextEditingDeltaNonTextUpdate(
+            oldText: '. Item 12',
+            selection: TextSelection.collapsed(offset: 9),
+            composing: TextRange.collapsed(9),
+          ),
+        ], getter: imeClientGetter);
 
         // Press enter to create a new list item.
         await tester.pressEnter();
@@ -181,7 +243,7 @@ void main() {
 
         // Ensure the existing item remains the same.
         expect(document.nodes.first, isA<ListItemNode>());
-        expect((document.nodes.first as ListItemNode).text.text, "Item 1");
+        expect((document.nodes.first as ListItemNode).text.text, "Item 12");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.nodes.last, isA<ListItemNode>());
@@ -210,6 +272,17 @@ void main() {
         // Place the caret at the end of the list item.
         await tester.placeCaretInParagraph(document.nodes.first.id, 6);
 
+        // Type at the end of the list item to generate a composing region,
+        // simulating the Samsung keyboard.
+        await tester.typeImeText('2');
+        await tester.ime.sendDeltas(const [
+          TextEditingDeltaNonTextUpdate(
+            oldText: '. Item 12',
+            selection: TextSelection.collapsed(offset: 9),
+            composing: TextRange.collapsed(9),
+          ),
+        ], getter: imeClientGetter);
+
         // On Android, pressing ENTER generates a "\n" insertion.
         await tester.typeImeText("\n");
 
@@ -218,7 +291,7 @@ void main() {
 
         // Ensure the existing item remains the same.
         expect(document.nodes.first, isA<ListItemNode>());
-        expect((document.nodes.first as ListItemNode).text.text, "Item 1");
+        expect((document.nodes.first as ListItemNode).text.text, "Item 12");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.nodes.last, isA<ListItemNode>());
@@ -247,6 +320,17 @@ void main() {
         // Place the caret at the end of the list item.
         await tester.placeCaretInParagraph(document.nodes.first.id, 6);
 
+        // Type at the end of the list item to generate a composing region,
+        // simulating the Samsung keyboard.
+        await tester.typeImeText('2');
+        await tester.ime.sendDeltas(const [
+          TextEditingDeltaNonTextUpdate(
+            oldText: '. Item 12',
+            selection: TextSelection.collapsed(offset: 9),
+            composing: TextRange.collapsed(9),
+          ),
+        ], getter: imeClientGetter);
+
         // On iOS, pressing ENTER generates a newline action.
         await tester.testTextInput.receiveAction(TextInputAction.newline);
 
@@ -255,7 +339,7 @@ void main() {
 
         // Ensure the existing item remains the same.
         expect(document.nodes.first, isA<ListItemNode>());
-        expect((document.nodes.first as ListItemNode).text.text, "Item 1");
+        expect((document.nodes.first as ListItemNode).text.text, "Item 12");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.nodes.last, isA<ListItemNode>());
@@ -376,63 +460,278 @@ void main() {
     });
 
     group('ordered list', () {
+      testWidgetsOnArbitraryDesktop('keeps sequence for items split by unordered list', (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown("""
+1. First ordered item
+   - First unordered item
+   - Second unoredered item
+
+2. Second ordered item
+   - First unordered item
+   - Second unoredered item""") //
+            .pump();
+
+        expect(context.document.nodes.length, 6);
+
+        // Ensure the nodes have the correct type.
+        expect(context.document.nodes[0], isA<ListItemNode>());
+        expect((context.document.nodes[0] as ListItemNode).type, ListItemType.ordered);
+
+        expect(context.document.nodes[1], isA<ListItemNode>());
+        expect((context.document.nodes[1] as ListItemNode).type, ListItemType.unordered);
+
+        expect(context.document.nodes[2], isA<ListItemNode>());
+        expect((context.document.nodes[2] as ListItemNode).type, ListItemType.unordered);
+
+        expect(context.document.nodes[3], isA<ListItemNode>());
+        expect((context.document.nodes[3] as ListItemNode).type, ListItemType.ordered);
+
+        expect(context.document.nodes[4], isA<ListItemNode>());
+        expect((context.document.nodes[4] as ListItemNode).type, ListItemType.unordered);
+
+        expect(context.document.nodes[5], isA<ListItemNode>());
+        expect((context.document.nodes[5] as ListItemNode).type, ListItemType.unordered);
+
+        // Ensure the sequence was kept.
+        final firstOrderedItem = tester.widget<OrderedListItemComponent>(
+          find.ancestor(
+            of: find.byWidget(SuperEditorInspector.findWidgetForComponent(context.document.nodes[0].id)),
+            matching: find.byType(OrderedListItemComponent),
+          ),
+        );
+        expect(firstOrderedItem.listIndex, 1);
+
+        final secondOrderedItem = tester.widget<OrderedListItemComponent>(
+          find.ancestor(
+            of: find.byWidget(SuperEditorInspector.findWidgetForComponent(context.document.nodes[3].id)),
+            matching: find.byType(OrderedListItemComponent),
+          ),
+        );
+        expect(secondOrderedItem.listIndex, 2);
+      });
+
+      testWidgetsOnArbitraryDesktop('keeps sequence for items split by ordered list items with higher indentation',
+          (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown("""
+ 1. list item 1
+ 2. list item 2
+    1. list item 2.1
+    2. list item 2.2
+ 3. list item 3
+    1. list item 3.1
+""") //
+            .pump();
+
+        expect(context.document.nodes.length, 6);
+
+        // Ensure the nodes have the correct type.
+        for (int i = 0; i < 6; i++) {
+          expect(context.document.nodes[i], isA<ListItemNode>());
+          expect((context.document.nodes[i] as ListItemNode).type, ListItemType.ordered);
+        }
+
+        // Ensure the sequence was kept.
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[0].id), 1);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[1].id), 2);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[2].id), 1);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[3].id), 2);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[4].id), 3);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[5].id), 1);
+      });
+
+      testWidgetsOnArbitraryDesktop('restarts item order when separated by an unordered item', (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown("""
+1. First ordered item
+2. Second ordered item
+- First unordered item
+- Second unordered item
+1. First ordered item
+2. Second ordered item""") //
+            .pump();
+
+        expect(context.document.nodes.length, 6);
+
+        // Ensure the nodes have the correct type.
+        expect(context.document.nodes[0], isA<ListItemNode>());
+        expect((context.document.nodes[0] as ListItemNode).type, ListItemType.ordered);
+
+        expect(context.document.nodes[1], isA<ListItemNode>());
+        expect((context.document.nodes[1] as ListItemNode).type, ListItemType.ordered);
+
+        expect(context.document.nodes[2], isA<ListItemNode>());
+        expect((context.document.nodes[2] as ListItemNode).type, ListItemType.unordered);
+
+        expect(context.document.nodes[3], isA<ListItemNode>());
+        expect((context.document.nodes[3] as ListItemNode).type, ListItemType.unordered);
+
+        expect(context.document.nodes[4], isA<ListItemNode>());
+        expect((context.document.nodes[4] as ListItemNode).type, ListItemType.ordered);
+
+        expect(context.document.nodes[5], isA<ListItemNode>());
+        expect((context.document.nodes[5] as ListItemNode).type, ListItemType.ordered);
+
+        // Ensure the sequence restarted after the unordered items.
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[0].id), 1);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[1].id), 2);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[4].id), 1);
+        expect(SuperEditorInspector.findListItemOrdinal(context.document.nodes[5].id), 2);
+      });
+
+      testWidgetsOnArbitraryDesktop('does not keep sequence for items split by paragraphs', (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown("""
+1. First ordered item
+
+A paragraph
+
+2. Second ordered item""") //
+            .pump();
+
+        expect(context.document.nodes.length, 3);
+
+        // Ensure the nodes have the correct type.
+        expect(context.document.nodes[0], isA<ListItemNode>());
+        expect((context.document.nodes[0] as ListItemNode).type, ListItemType.ordered);
+
+        expect(context.document.nodes[1], isA<ParagraphNode>());
+
+        expect(context.document.nodes[2], isA<ListItemNode>());
+        expect((context.document.nodes[2] as ListItemNode).type, ListItemType.ordered);
+
+        // Ensure the sequence reset when reaching the second list item.
+        final firstOrderedItem = tester.widget<OrderedListItemComponent>(
+          find.ancestor(
+            of: find.byWidget(SuperEditorInspector.findWidgetForComponent(context.document.nodes[0].id)),
+            matching: find.byType(OrderedListItemComponent),
+          ),
+        );
+        expect(firstOrderedItem.listIndex, 1);
+
+        final secondOrderedItem = tester.widget<OrderedListItemComponent>(
+          find.ancestor(
+            of: find.byWidget(SuperEditorInspector.findWidgetForComponent(context.document.nodes[2].id)),
+            matching: find.byType(OrderedListItemComponent),
+          ),
+        );
+        expect(secondOrderedItem.listIndex, 1);
+      });
+
       testWidgetsOnArbitraryDesktop('updates caret position when indenting', (tester) async {
-        await _pumpOrderedList(tester);
+        await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemId = doc.nodes.first.id;
+        final listItemNode = doc.nodes.first as ListItemNode;
 
         // Place caret at the first list item, which has one level of indentation.
-        await tester.placeCaretInParagraph(listItemId, 0);
+        await tester.placeCaretInParagraph(listItemNode.id, 0);
 
+        // Ensure the list item has first level of indentation.
+        expect(listItemNode.indent, 0);
+
+        // Ensure the caret is initially positioned near the upstream edge of the first
+        // character of the list item.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
         final caretOffsetBeforeIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        final firstCharacterRectBeforeIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetBeforeIndent.dx, moreOrLessEquals(firstCharacterRectBeforeIndent.left, epsilon: 5));
 
         // Press tab to trigger the list indent command.
         await tester.pressTab();
 
-        // Compute the offset at which the caret should be displayed.
-        final computedOffsetAfterIndent = SuperEditorInspector.calculateOffsetForCaret(
-          DocumentPosition(
-            nodeId: listItemId,
-            nodePosition: const TextNodePosition(offset: 0),
-          ),
-        );
+        // Ensure the list item has second level of indentation.
+        expect(listItemNode.indent, 1);
 
-        // Ensure the list indentation was actually performed.
-        expect(computedOffsetAfterIndent.dx, greaterThan(caretOffsetBeforeIndent.dx));
-
-        // Ensure the caret is being displayed at the correct position.
-        expect(SuperEditorInspector.findCaretOffsetInDocument(), offsetMoreOrLessEquals(computedOffsetAfterIndent));
+        // Ensure that the caret's current offset is downstream from the initial caret offset,
+        // and also that the current caret offset is roughly positioned near the upstream edge
+        // of the first list item character.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
+        final caretOffsetAfterIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        expect(caretOffsetAfterIndent.dx, greaterThan(caretOffsetBeforeIndent.dx));
+        final firstCharacterRectAfterIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetAfterIndent.dx, moreOrLessEquals(firstCharacterRectAfterIndent.left, epsilon: 5));
       });
 
       testWidgetsOnArbitraryDesktop('updates caret position when unindenting', (tester) async {
-        await _pumpOrderedList(tester);
+        await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemId = doc.nodes.last.id;
+        final listItemNode = doc.nodes.last as ListItemNode;
 
         // Place caret at the last list item, which has two levels of indentation.
         // For some reason, taping at the first character isn't displaying any caret,
         // so we put the caret at the second character and then go back one position.
-        await tester.placeCaretInParagraph(listItemId, 1);
+        await tester.placeCaretInParagraph(listItemNode.id, 1);
         await tester.pressLeftArrow();
 
-        final caretOffsetBeforeUnindent = SuperEditorInspector.findCaretOffsetInDocument();
+        // Ensure the list item has second level of indentation.
+        expect(listItemNode.indent, 1);
+
+        // Ensure the caret is initially positioned near the upstream edge of the first
+        // character of the list item.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
+        final caretOffsetBeforeUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        final firstCharacterRectBeforeUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetBeforeUnIndent.dx, moreOrLessEquals(firstCharacterRectBeforeUnIndent.left, epsilon: 5));
 
         // Press backspace to trigger the list unindent command.
         await tester.pressBackspace();
 
-        // Compute the offset at which the caret should be displayed.
-        final computedOffsetAfterUnindent = SuperEditorInspector.calculateOffsetForCaret(DocumentPosition(
-          nodeId: listItemId,
-          nodePosition: const TextNodePosition(offset: 0),
-        ));
+        // Ensure the list item has first level of indentation.
+        expect(listItemNode.indent, 0);
 
-        // Ensure the list indentation was actually performed.
-        expect(computedOffsetAfterUnindent.dx, lessThan(caretOffsetBeforeUnindent.dx));
+        // Ensure that the caret's current offset is upstream from the initial caret offset,
+        // and also that the current caret offset is roughly positioned near the upstream edge
+        // of the first list item character.
+        //
+        // We only care about a roughly accurate caret offset because the logic around
+        // exact caret positioning might change and we don't want that to break this test.
+        final caretOffsetAfterUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
+        expect(caretOffsetAfterUnIndent.dx, lessThan(caretOffsetBeforeUnIndent.dx));
+        final firstCharacterRectAfterUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
+          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+        )!;
+        expect(caretOffsetAfterUnIndent.dx, moreOrLessEquals(firstCharacterRectAfterUnIndent.left, epsilon: 5));
+      });
 
-        // Ensure the caret is being displayed at the correct position.
-        expect(SuperEditorInspector.findCaretOffsetInDocument(), offsetMoreOrLessEquals(computedOffsetAfterUnindent));
+      testWidgetsOnDesktop('unindents with SHIFT + TAB', (tester) async {
+        await _pumpOrderedListWithTextField(tester);
+
+        final doc = SuperEditorInspector.findDocument()!;
+        final listItemNode = doc.nodes.last as ListItemNode;
+
+        // Place caret at the last list item, which has two levels of indentation.
+        // For some reason, taping at the first character isn't displaying any caret,
+        // so we put the caret at the second character and then go back one position.
+        await tester.placeCaretInParagraph(listItemNode.id, 1);
+        await tester.pressLeftArrow();
+
+        // Ensure the list item has second level of indentation.
+        expect(listItemNode.indent, 1);
+
+        // Press SHIFT + TAB to trigger the list unindent command.
+        await _pressShiftTab(tester);
+
+        // Ensure the list item has first level of indentation.
+        expect(listItemNode.indent, 0);
       });
 
       testWidgetsOnAllPlatforms("inserts new item on ENTER at end of existing item", (tester) async {
@@ -672,6 +971,42 @@ Future<TestDocumentContext> _pumpUnorderedList(
       .pump();
 }
 
+/// Pumps a [SuperEditor] containing 4 unordered list items and a [TextField] below it.
+///
+/// The first two items have one level of indentation.
+///
+/// The last two items have two levels of indentation.
+Future<TestDocumentContext> _pumpUnorderedListWithTextField(
+  WidgetTester tester, {
+  Stylesheet? styleSheet,
+}) async {
+  const markdown = '''
+ * list item 1
+ * list item 2
+   * list item 2.1
+   * list item 2.2''';
+
+  return await tester //
+      .createDocument()
+      .fromMarkdown(markdown)
+      .useStylesheet(styleSheet)
+      .withInputSource(TextInputSource.ime)
+      .withCustomWidgetTreeBuilder(
+        (superEditor) => MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                const TextField(),
+                Expanded(child: superEditor),
+                const TextField(),
+              ],
+            ),
+          ),
+        ),
+      )
+      .pump();
+}
+
 /// Pumps a [SuperEditor] containing 4 ordered list items.
 ///
 /// The first two items have one level of indentation.
@@ -694,6 +1029,49 @@ Future<TestDocumentContext> _pumpOrderedList(
       .pump();
 }
 
+/// Pumps a [SuperEditor] containing 4 ordered list items and a [TextField] below it.
+///
+/// The first two items have one level of indentation.
+///
+/// The last two items have two levels of indentation.
+Future<TestDocumentContext> _pumpOrderedListWithTextField(
+  WidgetTester tester, {
+  Stylesheet? styleSheet,
+}) async {
+  const markdown = '''
+ 1. list item 1
+ 1. list item 2
+    1. list item 2.1
+    1. list item 2.2''';
+
+  return await tester //
+      .createDocument()
+      .fromMarkdown(markdown)
+      .useStylesheet(styleSheet)
+      .withInputSource(TextInputSource.ime)
+      .withCustomWidgetTreeBuilder(
+        (superEditor) => MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                Expanded(child: superEditor),
+                const TextField(),
+              ],
+            ),
+          ),
+        ),
+      )
+      .pump();
+}
+
+Future<void> _pressShiftTab(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.tab);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.tab);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+  await tester.pumpAndSettle();
+}
+
 TextStyle _inlineTextStyler(Set<Attribution> attributions, TextStyle base) => base;
 
 final _styleSheet = Stylesheet(
@@ -703,7 +1081,7 @@ final _styleSheet = Stylesheet(
       const BlockSelector("paragraph"),
       (doc, docNode) {
         return {
-          "textStyle": const TextStyle(
+          Styles.textStyle: const TextStyle(
             color: Colors.red,
             fontSize: 16,
           ),
@@ -714,7 +1092,7 @@ final _styleSheet = Stylesheet(
       const BlockSelector("listItem"),
       (doc, docNode) {
         return {
-          "textStyle": const TextStyle(
+          Styles.textStyle: const TextStyle(
             color: Colors.blue,
             fontSize: 16,
           ),

@@ -21,10 +21,11 @@ String serializeDocumentToMarkdown(
     // specialized cases of traditional nodes, such as serializing a
     // `ParagraphNode` with a special `"blockType"`.
     ...customNodeSerializers,
-    const ImageNodeSerializer(),
+    ImageNodeSerializer(useSizeNotation: syntax == MarkdownSyntax.superEditor),
     const HorizontalRuleNodeSerializer(),
     const ListItemNodeSerializer(),
     const TaskNodeSerializer(),
+    HeaderNodeSerializer(syntax),
     ParagraphNodeSerializer(syntax),
   ];
 
@@ -79,11 +80,34 @@ abstract class NodeTypedDocumentNodeMarkdownSerializer<NodeType> implements Docu
 /// [DocumentNodeMarkdownSerializer] for serializing [ImageNode]s as standard Markdown
 /// images.
 class ImageNodeSerializer extends NodeTypedDocumentNodeMarkdownSerializer<ImageNode> {
-  const ImageNodeSerializer();
+  const ImageNodeSerializer({
+    this.useSizeNotation = false,
+  });
+
+  final bool useSizeNotation;
 
   @override
   String doSerialization(Document document, ImageNode node) {
-    return '![${node.altText}](${node.imageUrl})';
+    if (!useSizeNotation || (node.expectedBitmapSize?.width == null && node.expectedBitmapSize?.height == null)) {
+      // We don't want to use size notation or the image doesn't have
+      // size information. Use the regular syntax.
+      return '![${node.altText}](${node.imageUrl})';
+    }
+
+    StringBuffer sizeNotation = StringBuffer();
+    sizeNotation.write(' =');
+
+    if (node.expectedBitmapSize?.width != null) {
+      sizeNotation.write(node.expectedBitmapSize!.width!.toInt());
+    }
+
+    sizeNotation.write('x');
+
+    if (node.expectedBitmapSize?.height != null) {
+      sizeNotation.write(node.expectedBitmapSize!.height!.toInt());
+    }
+
+    return '![${node.altText}](${node.imageUrl}${sizeNotation.toString()})';
   }
 }
 
@@ -231,7 +255,9 @@ class AttributedTextMarkdownSerializer extends AttributionVisitor {
     _fullText = attributedText.text;
     _buffer = StringBuffer();
     _bufferCursor = 0;
-    attributedText.visitAttributions(this);
+    if (attributedText.text.isNotEmpty) {
+      attributedText.visitAttributions(this);
+    }
     return _buffer.toString();
   }
 
@@ -349,7 +375,7 @@ class AttributedTextMarkdownSerializer extends AttributionVisitor {
   /// Checks for the presence of a link in the attributions and returns the characters necessary to represent it
   /// at the open or closing boundary of the attribution, depending on the event.
   static String _encodeLinkMarker(Set<Attribution> attributions, AttributionVisitEvent event) {
-    final linkAttributions = attributions.where((element) => element is LinkAttribution?);
+    final linkAttributions = attributions.whereType<LinkAttribution?>();
     if (linkAttributions.isNotEmpty) {
       final linkAttribution = linkAttributions.first as LinkAttribution;
 
@@ -360,5 +386,80 @@ class AttributedTextMarkdownSerializer extends AttributionVisitor {
       }
     }
     return "";
+  }
+}
+
+/// [DocumentNodeMarkdownSerializer], which serializes Markdown headers to
+/// [ParagraphNode]s with an appropriate header block type, and (optionally) a
+/// block alignment.
+///
+/// Headers are represented by `ParagraphNode`s and therefore this serializer must
+/// run before a [ParagraphNodeSerializer], so that this serializer can process
+/// header-specific details, such as header alignment.
+class HeaderNodeSerializer extends NodeTypedDocumentNodeMarkdownSerializer<ParagraphNode> {
+  const HeaderNodeSerializer(this.markdownSyntax);
+
+  final MarkdownSyntax markdownSyntax;
+
+  @override
+  String? serialize(Document document, DocumentNode node) {
+    if (node is! ParagraphNode) {
+      return null;
+    }
+
+    // Only serialize this node when this is a header node.
+    final Attribution? blockType = node.getMetadataValue('blockType');
+    final isHeaderNode = blockType == header1Attribution ||
+        blockType == header2Attribution ||
+        blockType == header3Attribution ||
+        blockType == header4Attribution ||
+        blockType == header5Attribution ||
+        blockType == header6Attribution;
+
+    if (!isHeaderNode) {
+      return null;
+    }
+
+    return doSerialization(document, node);
+  }
+
+  @override
+  String doSerialization(Document document, ParagraphNode node) {
+    final buffer = StringBuffer();
+
+    final Attribution? blockType = node.getMetadataValue('blockType');
+    final String? textAlign = node.getMetadataValue('textAlign');
+
+    // Add the alignment token, we exclude the left alignment because it's the default.
+    if (markdownSyntax == MarkdownSyntax.superEditor && textAlign != null && textAlign != 'left') {
+      final alignmentToken = _convertAlignmentToMarkdown(textAlign);
+      if (alignmentToken != null) {
+        buffer.writeln(alignmentToken);
+      }
+    }
+
+    if (blockType == header1Attribution) {
+      buffer.write('# ${node.text.toMarkdown()}');
+    } else if (blockType == header2Attribution) {
+      buffer.write('## ${node.text.toMarkdown()}');
+    } else if (blockType == header3Attribution) {
+      buffer.write('### ${node.text.toMarkdown()}');
+    } else if (blockType == header4Attribution) {
+      buffer.write('#### ${node.text.toMarkdown()}');
+    } else if (blockType == header5Attribution) {
+      buffer.write('##### ${node.text.toMarkdown()}');
+    } else if (blockType == header6Attribution) {
+      buffer.write('###### ${node.text.toMarkdown()}');
+    }
+
+    // We're not at the end of the document yet. Add a blank line after the
+    // paragraph so that we can tell the difference between separate
+    // paragraphs vs. newlines within a single paragraph.
+    final nodeIndex = document.getNodeIndexById(node.id);
+    if (nodeIndex != document.nodes.length - 1) {
+      buffer.writeln();
+    }
+
+    return buffer.toString();
   }
 }

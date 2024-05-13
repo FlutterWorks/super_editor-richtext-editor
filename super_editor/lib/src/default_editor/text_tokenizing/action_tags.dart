@@ -88,9 +88,9 @@ class ActionTagsPlugin extends SuperEditorPlugin {
   List<DocumentKeyboardAction> get keyboardActions => [_cancelOnEscape];
   ExecutionInstruction _cancelOnEscape({
     required SuperEditorContext editContext,
-    required RawKeyEvent keyEvent,
+    required KeyEvent keyEvent,
   }) {
-    if (keyEvent is RawKeyDownEvent) {
+    if (keyEvent is KeyDownEvent || keyEvent is KeyRepeatEvent) {
       return ExecutionInstruction.continueExecution;
     }
 
@@ -145,8 +145,8 @@ class SubmitComposingActionTagCommand implements EditCommand {
     context.composingActionTag.value = null;
 
     executor.executeCommand(
-      DeleteSelectionCommand(
-        documentSelection: DocumentSelection(
+      DeleteContentCommand(
+        documentRange: DocumentSelection(
           base: tagAroundPosition.indexedTag.start,
           extent: tagAroundPosition.indexedTag.end,
         ),
@@ -239,7 +239,7 @@ class CancelComposingActionTagCommand implements EditCommand {
     // Remove the composing attribution.
     executor.executeCommand(
       RemoveTextAttributionsCommand(
-        documentSelection: textNode!.selectionBetween(
+        documentRange: textNode!.selectionBetween(
           composingToken.indexedTag.startOffset,
           composingToken.indexedTag.endOffset,
         ),
@@ -248,7 +248,7 @@ class CancelComposingActionTagCommand implements EditCommand {
     );
     executor.executeCommand(
       AddTextAttributionsCommand(
-        documentSelection: textNode.selectionBetween(
+        documentRange: textNode.selectionBetween(
           composingToken.indexedTag.startOffset,
           composingToken.indexedTag.endOffset,
         ),
@@ -361,13 +361,13 @@ class ActionTagComposingReaction implements EditReaction {
   List<EditRequest> _healCancelledTagsInTextNode(RequestDispatcher requestDispatcher, TextNode node) {
     final cancelledTagRanges = node.text.getAttributionSpansInRange(
       attributionFilter: (a) => a == actionTagCancelledAttribution,
-      range: SpanRange(0, node.text.text.length - 1),
+      range: SpanRange(0, node.text.length - 1),
     );
 
     final changeRequests = <EditRequest>[];
 
     for (final range in cancelledTagRanges) {
-      final cancelledText = node.text.text.substring(range.start, range.end + 1); // +1 because substring is exclusive
+      final cancelledText = node.text.substring(range.start, range.end + 1); // +1 because substring is exclusive
       if (cancelledText == _tagRule.trigger) {
         // This is a legitimate cancellation attribution.
         continue;
@@ -383,12 +383,12 @@ class ActionTagComposingReaction implements EditReaction {
 
       changeRequests.addAll([
         RemoveTextAttributionsRequest(
-          documentSelection: node.selectionBetween(range.start, range.end),
+          documentRange: node.selectionBetween(range.start, range.end),
           attributions: {actionTagCancelledAttribution},
         ),
         if (addedRange != null) //
           AddTextAttributionsRequest(
-            documentSelection: addedRange,
+            documentRange: addedRange,
             attributions: {actionTagCancelledAttribution},
           ),
       ]);
@@ -404,14 +404,14 @@ class ActionTagComposingReaction implements EditReaction {
     requestDispatcher.execute([
       if (oldComposingTag != null)
         RemoveTextAttributionsRequest(
-          documentSelection: DocumentSelection(
+          documentRange: DocumentSelection(
             base: oldComposingTag.start,
             extent: oldComposingTag.end,
           ),
           attributions: {actionTagComposingAttribution},
         ),
       AddTextAttributionsRequest(
-        documentSelection: DocumentSelection(
+        documentRange: DocumentSelection(
           base: newTag.start,
           extent: newTag.end,
         ),
@@ -430,14 +430,14 @@ class ActionTagComposingReaction implements EditReaction {
 
     requestDispatcher.execute([
       RemoveTextAttributionsRequest(
-        documentSelection: DocumentSelection(
+        documentRange: DocumentSelection(
           base: composingTag.start,
           extent: composingTag.end,
         ),
         attributions: {actionTagComposingAttribution},
       ),
       AddTextAttributionsRequest(
-        documentSelection: DocumentSelection(
+        documentRange: DocumentSelection(
           base: composingTag.start,
           extent: composingTag.start.copyWith(
             nodePosition: TextNodePosition(offset: composingTag.startOffset + 1),

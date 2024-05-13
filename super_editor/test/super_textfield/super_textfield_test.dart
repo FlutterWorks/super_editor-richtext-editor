@@ -97,76 +97,73 @@ void main() {
     });
 
     group("on mobile", () {
-      group("configures inner textfield textInputAction for newline when it's multiline", () {
-        testWidgetsOnAndroid('(on Android)', (tester) async {
-          await tester.pumpWidget(
-            _buildScaffold(
-              child: const SuperTextField(
-                minLines: 10,
-                maxLines: 10,
-              ),
+      testWidgetsOnAndroid("configures inner textfield textInputAction for newline when it's multiline",
+          (tester) async {
+        await tester.pumpWidget(
+          _buildScaffold(
+            child: const SuperTextField(
+              minLines: 10,
+              maxLines: 10,
             ),
-          );
+          ),
+        );
 
-          final innerTextField = tester.widget<SuperAndroidTextField>(find.byType(SuperAndroidTextField).first);
+        final innerTextField = tester.widget<SuperAndroidTextField>(find.byType(SuperAndroidTextField).first);
 
-          // Ensure inner textfield action is configured to newline
-          // so we are able to receive new lines
-          expect(innerTextField.textInputAction, TextInputAction.newline);
-        });
-
-        testWidgetsOnIos('(on iOS)', (tester) async {
-          await tester.pumpWidget(
-            _buildScaffold(
-              child: const SuperTextField(
-                minLines: 10,
-                maxLines: 10,
-              ),
-            ),
-          );
-
-          final innerTextField = tester.widget<SuperIOSTextField>(find.byType(SuperIOSTextField).first);
-
-          // Ensure inner textfield action is configured to newline
-          // so we are able to receive new lines
-          expect(innerTextField.textInputAction, TextInputAction.newline);
-        });
+        // Ensure inner textfield action is configured to newline
+        // so we are able to receive new lines
+        expect(innerTextField.textInputAction, TextInputAction.newline);
       });
 
-      group("configures inner textfield textInputAction for done when it's singleline", () {
-        testWidgetsOnAndroid('(on Android)', (tester) async {
-          await tester.pumpWidget(
-            _buildScaffold(
-              child: const SuperTextField(
-                minLines: 1,
-                maxLines: 1,
-              ),
+      testWidgetsOnIos("configures inner textfield textInputAction for newline when it's multiline", (tester) async {
+        await tester.pumpWidget(
+          _buildScaffold(
+            child: const SuperTextField(
+              minLines: 10,
+              maxLines: 10,
             ),
-          );
+          ),
+        );
 
-          final innerTextField = tester.widget<SuperAndroidTextField>(find.byType(SuperAndroidTextField).first);
+        final innerTextField = tester.widget<SuperIOSTextField>(find.byType(SuperIOSTextField).first);
 
-          // Ensure inner textfield action is configured to done
-          // because we should NOT receive new lines
-          expect(innerTextField.textInputAction, TextInputAction.done);
-        });
+        // Ensure inner textfield action is configured to newline
+        // so we are able to receive new lines
+        expect(innerTextField.textInputAction, TextInputAction.newline);
+      });
 
-        testWidgetsOnIos('(on iOS)', (tester) async {
-          await tester.pumpWidget(
-            _buildScaffold(
-              child: const SuperTextField(
-                minLines: 1,
-                maxLines: 1,
-              ),
+      testWidgetsOnAndroid("configures inner textfield textInputAction for done when it's singleline", (tester) async {
+        await tester.pumpWidget(
+          _buildScaffold(
+            child: const SuperTextField(
+              minLines: 1,
+              maxLines: 1,
             ),
-          );
+          ),
+        );
 
-          final innerTextField = tester.widget<SuperIOSTextField>(find.byType(SuperIOSTextField).first);
+        final innerTextField = tester.widget<SuperAndroidTextField>(find.byType(SuperAndroidTextField).first);
 
-          // Ensure inner textfield action is configured to done
-          // because we should NOT receive new lines
-          expect(innerTextField.textInputAction, TextInputAction.done);
-        });
+        // Ensure inner textfield action is configured to done
+        // because we should NOT receive new lines
+        expect(innerTextField.textInputAction, TextInputAction.done);
+      });
+
+      testWidgetsOnIos("configures inner textfield textInputAction for done when it's singleline", (tester) async {
+        await tester.pumpWidget(
+          _buildScaffold(
+            child: const SuperTextField(
+              minLines: 1,
+              maxLines: 1,
+            ),
+          ),
+        );
+
+        final innerTextField = tester.widget<SuperIOSTextField>(find.byType(SuperIOSTextField).first);
+
+        // Ensure inner textfield action is configured to done
+        // because we should NOT receive new lines
+        expect(innerTextField.textInputAction, TextInputAction.done);
       });
 
       testWidgetsOnIos('applies keyboard appearance', (tester) async {
@@ -365,7 +362,7 @@ void main() {
         await tester.pumpAndSettle();
 
         final textFieldRect = tester.getRect(find.byType(SuperTextField));
-        final contentRect = tester.getRect(find.byType(SuperTextWithSelection));
+        final contentRect = tester.getRect(find.byType(SuperText));
 
         // Ensure padding was applied.
         expect(contentRect.left - textFieldRect.left, 5);
@@ -401,7 +398,7 @@ SuperTextField
       );
       await tester.pumpAndSettle();
 
-      final textSize = tester.getSize(find.byType(SuperTextWithSelection));
+      final textSize = tester.getSize(find.byType(SuperText));
       final textFieldSize = tester.getSize(find.byType(SuperTextField));
 
       // Ensure the text field height is big enough to display the whole content.

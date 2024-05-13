@@ -34,7 +34,7 @@ class TextLayoutCaretState extends State<TextLayoutCaret> with TickerProviderSta
   @override
   void initState() {
     super.initState();
-    _blinkController = _createBlinkController();
+    _blinkController = _obtainBlinkController();
     if (widget.blinkCaret) {
       _blinkController.startBlinking();
     }
@@ -56,7 +56,7 @@ class TextLayoutCaretState extends State<TextLayoutCaret> with TickerProviderSta
           oldBlinkController.dispose();
         });
       }
-      _blinkController = _createBlinkController();
+      _blinkController = _obtainBlinkController();
     }
 
     if (widget.position != oldWidget.position && widget.blinkCaret) {
@@ -75,9 +75,9 @@ class TextLayoutCaretState extends State<TextLayoutCaret> with TickerProviderSta
     super.dispose();
   }
 
-  BlinkController _createBlinkController() {
+  BlinkController _obtainBlinkController() {
     if (widget.blinkController != null) {
-      return _blinkController;
+      return widget.blinkController!;
     }
 
     switch (widget.blinkTimingMode) {
@@ -91,13 +91,33 @@ class TextLayoutCaretState extends State<TextLayoutCaret> with TickerProviderSta
   @visibleForTesting
   bool get isCaretPresent => widget.position != null && widget.position!.offset >= 0;
 
+  @visibleForTesting
+  Offset? get caretOffset => isCaretPresent
+      ? widget.textLayout.getOffsetForCaret(widget.position!).translate(-widget.style.width / 2, 0.0)
+      : null;
+
+  @visibleForTesting
+  double? get caretHeight => isCaretPresent
+      ? widget.textLayout.getHeightForCaret(widget.position!) ??
+          widget.textLayout.getLineHeightAtPosition(widget.position!)
+      : null;
+
+  @visibleForTesting
+  Rect? get localCaretGeometry => isCaretPresent ? caretOffset! & Size(widget.style.width, caretHeight!) : null;
+
+  Rect? get globalCaretGeometry {
+    if (!isCaretPresent) {
+      return null;
+    }
+
+    final topLeftInGlobalSpace = (context.findRenderObject() as RenderBox).localToGlobal(Offset.zero);
+    return localCaretGeometry!.translate(topLeftInGlobalSpace.dx, topLeftInGlobalSpace.dy);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final offset = isCaretPresent ? widget.textLayout.getOffsetForCaret(widget.position!) : null;
-    final height = isCaretPresent
-        ? widget.textLayout.getHeightForCaret(widget.position!) ??
-            widget.textLayout.getLineHeightAtPosition(widget.position!)
-        : null;
+    final offset = caretOffset;
+    final height = caretHeight;
 
     return Stack(
       clipBehavior: Clip.none,

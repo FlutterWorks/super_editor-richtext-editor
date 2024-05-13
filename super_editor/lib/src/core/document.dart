@@ -1,6 +1,5 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/widgets.dart';
-import 'package:super_editor/src/default_editor/text.dart';
 
 /// A read-only document with styled text and multimedia elements.
 ///
@@ -55,14 +54,6 @@ abstract class Document {
   /// Returns the [DocumentNode] at the given [position], or [null] if
   /// no such node exists in this [Document].
   DocumentNode? getNode(DocumentPosition position);
-
-  /// Returns a [DocumentRange] that ranges from [position1] to
-  /// [position2], including [position1] and [position2].
-  // TODO: this method is misleading (#48) because if `position1` and
-  //       `position2` are in the same node, they may be returned
-  //       in the wrong order because the document doesn't know
-  //       how to interpret positions within a node.
-  DocumentRange getRangeBetween(DocumentPosition position1, DocumentPosition position2);
 
   /// Returns all [DocumentNode]s from [position1] to [position2], including
   /// the nodes at [position1] and [position2].
@@ -211,49 +202,6 @@ class NodeChangeEvent implements NodeDocumentChange {
   int get hashCode => nodeId.hashCode;
 }
 
-/// A span within a [Document] that begins at [start] and
-/// ends at [end].
-///
-/// The [start] position must come before the [end] position in
-/// the document.
-class DocumentRange {
-  /// Creates a document range from its start and end positions.
-  ///
-  /// The [start] position must come before the [end] position in
-  /// the document.
-  const DocumentRange({
-    required this.start,
-    required this.end,
-  });
-
-  /// The start position of the range represented by its position within the
-  /// document.
-  ///
-  /// The [start] position comes before the [end] position, or is equivalent to
-  /// the [end] position.
-  final DocumentPosition start;
-
-  /// The end position of the range represented by its position within the
-  /// document.
-  ///
-  /// The [end] position comes after the [start] position, or is equivalent to
-  /// the [start] position.
-  final DocumentPosition end;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DocumentRange && runtimeType == other.runtimeType && start == other.start && end == other.end;
-
-  @override
-  int get hashCode => start.hashCode ^ end.hashCode;
-
-  @override
-  String toString() {
-    return '[DocumentRange] - from: ($start), to: ($end)';
-  }
-}
-
 /// A logical position within a [Document].
 ///
 /// A [DocumentPosition] points to a specific node by way of a [nodeId],
@@ -291,6 +239,18 @@ class DocumentPosition {
   ///
   /// For example: a paragraph node might use a [TextNodePosition].
   final NodePosition nodePosition;
+
+  /// Whether this position within the document is equivalent to the given
+  /// [other] [DocumentPosition].
+  ///
+  /// Equivalency is determined by the [NodePosition]. For example, given two
+  /// [TextNodePosition]s, if both of them point to the same character, but one
+  /// has an upstream affinity and the other a downstream affinity, the two
+  /// [TextNodePosition]s are considered "non-equal", but they're considered
+  /// "equivalent" because both [TextNodePosition]s point to the same location
+  /// within the document.
+  bool isEquivalentTo(DocumentPosition other) =>
+      nodeId == other.nodeId && nodePosition.isEquivalentTo(other.nodePosition);
 
   @override
   bool operator ==(Object other) =>
@@ -452,11 +412,17 @@ abstract class NodeSelection {
   // marker interface
 }
 
-/// Marker interface for all node positions.
-///
-/// A node position is a logical position within a [DocumentNode],
-/// e.g., a [TextNodePosition] within a [ParagraphNode], or a [BinaryNodePosition]
-/// within an [ImageNode].
+/// A logical position within a [DocumentNode], e.g., a [TextNodePosition]
+/// within a [ParagraphNode], or a [BinaryNodePosition] within an [ImageNode].
 abstract class NodePosition {
-  // marker interface
+  /// Whether this [NodePosition] is equivalent to the [other] [NodePosition].
+  ///
+  /// Typically, [isEquivalentTo] should return the same value as [==], however,
+  /// some [NodePosition]s have properties that don't impact equivalency. For
+  /// example, a [TextNodePosition] has a concept of affinity (upstream/downstream),
+  /// which are used when making particular selection decisions, but affinity
+  /// doesn't impact equivalency. Two [TextNodePosition]s, which refer to the same
+  /// text offset, but have different affinities, returns `true` from [isEquivalentTo],
+  /// even though [==] returns `false`.
+  bool isEquivalentTo(NodePosition other);
 }

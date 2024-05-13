@@ -276,7 +276,7 @@ class UpdateGoldensCommand extends Command {
 ///
 /// The golden_tester.Dockerfile is used to build this image.
 Future<void> _buildDockerImage() async {
-  stdout.write('building image');
+  stdout.writeln('building image');
 
   await _runProcess(
     executable: 'docker',
@@ -318,8 +318,8 @@ Future<void> _runProcess({
     workingDirectory: workingDirectory,
   );
 
-  stdout.addStream(process.stdout);
-  stderr.addStream(process.stderr);
+  await stdout.addStream(process.stdout);
+  await stderr.addStream(process.stderr);
 
   final exitCode = await process.exitCode;
 

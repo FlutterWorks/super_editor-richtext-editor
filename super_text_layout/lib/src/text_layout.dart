@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/widgets.dart';
 
 import 'super_text.dart';
@@ -47,7 +48,11 @@ abstract class TextLayout {
   double? getHeightForCaret(TextPosition position);
 
   /// Returns a [List] of [TextBox]es that contain the given [selection].
-  List<TextBox> getBoxesForSelection(TextSelection selection);
+  List<TextBox> getBoxesForSelection(
+    TextSelection selection, {
+    BoxHeightStyle boxHeightStyle = BoxHeightStyle.tight,
+    BoxWidthStyle boxWidthStyle = BoxWidthStyle.tight,
+  });
 
   /// Returns a bounding [TextBox] for the character at the given [position] or `null`
   /// if a character box couldn't be found.
@@ -248,8 +253,7 @@ class RenderParagraphProseTextLayout implements ProseTextLayout {
     // If no text is currently displayed, we can't use a character box
     // to measure, but we may be able to use related metrics.
     if (_textLength == 0) {
-      final fontSize = _richText.style?.fontSize ?? 0.0;
-      final estimatedLineHeight = _renderParagraph.getFullHeightForCaret(position) ?? textScaler.scale(fontSize);
+      final estimatedLineHeight = _renderParagraph.getFullHeightForCaret(position);
       return estimatedLineHeight * lineHeightMultiplier;
     }
 
@@ -295,12 +299,20 @@ class RenderParagraphProseTextLayout implements ProseTextLayout {
   }
 
   @override
-  List<TextBox> getBoxesForSelection(TextSelection selection) {
+  List<TextBox> getBoxesForSelection(
+    TextSelection selection, {
+    BoxHeightStyle boxHeightStyle = BoxHeightStyle.tight,
+    BoxWidthStyle boxWidthStyle = BoxWidthStyle.tight,
+  }) {
     if (_renderParagraph.needsLayout) {
       return [];
     }
 
-    return _renderParagraph.getBoxesForSelection(selection);
+    return _renderParagraph.getBoxesForSelection(
+      selection,
+      boxHeightStyle: boxHeightStyle,
+      boxWidthStyle: boxWidthStyle,
+    );
   }
 
   @override
@@ -311,7 +323,7 @@ class RenderParagraphProseTextLayout implements ProseTextLayout {
 
     final plainText = _richText.toPlainText();
     if (plainText.isEmpty) {
-      final lineHeightEstimate = _renderParagraph.getFullHeightForCaret(const TextPosition(offset: 0)) ?? 0.0;
+      final lineHeightEstimate = _renderParagraph.getFullHeightForCaret(const TextPosition(offset: 0));
       return TextBox.fromLTRBD(0, 0, 0, lineHeightEstimate, TextDirection.ltr);
     }
 

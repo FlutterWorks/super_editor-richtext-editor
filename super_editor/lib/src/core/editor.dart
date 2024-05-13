@@ -1,8 +1,8 @@
 import 'dart:math';
-import 'dart:ui';
 
+import 'package:attributed_text/attributed_text.dart';
 import 'package:collection/collection.dart';
-import 'package:super_editor/src/core/document_selection.dart';
+import 'package:super_editor/src/default_editor/paragraph.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:uuid/uuid.dart';
 
@@ -441,6 +441,13 @@ class DocumentEdit implements EditEvent {
 
   @override
   String toString() => "DocumentEdit -> $change";
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || other is DocumentEdit && runtimeType == other.runtimeType && change == other.change;
+
+  @override
+  int get hashCode => change.hashCode;
 }
 
 /// An object that's notified with a change list from one or more
@@ -496,6 +503,20 @@ class MutableDocument implements Document, Editable {
     List<DocumentNode>? nodes,
   }) : _nodes = nodes ?? [] {
     _refreshNodeIdCaches();
+  }
+
+  /// Creates an [Document] with a single [ParagraphNode].
+  ///
+  /// Optionally, takes in a [nodeId] for the [ParagraphNode].
+  factory MutableDocument.empty([String? nodeId]) {
+    return MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: nodeId ?? Editor.createNodeId(),
+          text: AttributedText(),
+        ),
+      ],
+    );
   }
 
   void dispose() {
@@ -564,15 +585,6 @@ class MutableDocument implements Document, Editable {
 
   @override
   DocumentNode? getNode(DocumentPosition position) => getNodeById(position.nodeId);
-
-  @override
-  DocumentRange getRangeBetween(DocumentPosition position1, DocumentPosition position2) {
-    late TextAffinity affinity = getAffinityBetween(base: position1, extent: position2);
-    return DocumentRange(
-      start: affinity == TextAffinity.downstream ? position1 : position2,
-      end: affinity == TextAffinity.downstream ? position2 : position1,
-    );
-  }
 
   @override
   List<DocumentNode> getNodesInside(DocumentPosition position1, DocumentPosition position2) {

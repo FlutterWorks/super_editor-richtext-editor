@@ -8,6 +8,10 @@ import 'package:flutter/widgets.dart';
 /// to an ancestor `Scrollable`, if the document experience chooses to use an
 /// ancestor `Scrollable`.
 class DocumentScroller {
+  void dispose() {
+    _scrollChangeListeners.clear();
+  }
+
   /// The height of a vertically scrolling viewport, or the width of a horizontally
   /// scrolling viewport.
   double get viewportDimension => _scrollPosition!.viewportDimension;
@@ -29,6 +33,11 @@ class DocumentScroller {
     _scrollPosition!.jumpTo(newScrollOffset);
   }
 
+  /// Immediately moves the [scrollOffset] by [delta] pixels.
+  void jumpBy(double delta) {
+    _scrollPosition!.jumpTo(_scrollPosition!.pixels + delta);
+  }
+
   /// Animates [scrollOffset] from its current offset to [to], over the given [duration]
   /// of time, following the given animation [curve].
   void animateTo(
@@ -43,9 +52,23 @@ class DocumentScroller {
 
   void attach(ScrollPosition scrollPosition) {
     _scrollPosition = scrollPosition;
+    _scrollPosition!.addListener(_notifyScrollChangeListeners);
   }
 
   void detach() {
+    _scrollPosition?.removeListener(_notifyScrollChangeListeners);
     _scrollPosition = null;
+  }
+
+  final _scrollChangeListeners = <VoidCallback>{};
+
+  void addScrollChangeListener(VoidCallback listener) => _scrollChangeListeners.add(listener);
+
+  void removeScrollChangeListener(VoidCallback listener) => _scrollChangeListeners.remove(listener);
+
+  void _notifyScrollChangeListeners() {
+    for (final listener in _scrollChangeListeners) {
+      listener();
+    }
   }
 }

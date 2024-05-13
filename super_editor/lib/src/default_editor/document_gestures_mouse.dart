@@ -15,7 +15,7 @@ import 'package:super_editor/src/default_editor/selection_upstream_downstream.da
 import 'package:super_editor/src/default_editor/text_tools.dart';
 import 'package:super_editor/src/document_operations/selection_operations.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
-import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
 import 'package:super_editor/src/infrastructure/multi_tap_gesture.dart';
 
 import '../infrastructure/document_gestures_interaction_overrides.dart';
@@ -88,8 +88,16 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
   // Tracks user drag gestures for selection purposes.
   SelectionType _selectionType = SelectionType.position;
   Offset? _dragStartGlobal;
+  // The selection's document position where the user started dragging an expanded selection.
+  // The selection base is cached instead of continuously re-computed because components
+  // can change size and position during selection.
+  DocumentPosition? _dragSelectionBase;
   Offset? _dragEndGlobal;
   bool _expandSelectionDuringDrag = false;
+  // When selecting by word, this is the initial word's upstream position.
+  DocumentPosition? _wordSelectionUpstream;
+  // When selecting by word, this is the initial word's downstream position.
+  DocumentPosition? _wordSelectionDownstream;
 
   /// Holds which kind of device started a pan gesture, e.g., a mouse or a trackpad.
   PointerDeviceKind? _panGestureDevice;
@@ -162,9 +170,9 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
   }
 
   bool get _isShiftPressed =>
-      (RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
-          RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shiftRight) ||
-          RawKeyboard.instance.keysPressed.contains(LogicalKeyboardKey.shift)) &&
+      (HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftLeft) ||
+          HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shiftRight) ||
+          HardwareKeyboard.instance.logicalKeysPressed.contains(LogicalKeyboardKey.shift)) &&
       // TODO: this condition doesn't belong here. Move it to where it applies
       _currentSelection != null;
 
@@ -279,6 +287,7 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
           SelectionChangeType.expandSelection,
           SelectionReason.userInteraction,
         ),
+        const ClearComposingRegionRequest(),
       ]);
     } else {
       // Place the document selection at the location where the
@@ -319,6 +328,12 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
         docPosition: docPosition,
         docLayout: _docLayout,
       );
+      if (didSelectContent) {
+        // We selected a word - store the word bounds so that we can correctly
+        // select by word when moving upstream or downstream from this word.
+        _wordSelectionUpstream = widget.selectionNotifier.value!.start;
+        _wordSelectionDownstream = widget.selectionNotifier.value!.end;
+      }
 
       if (!didSelectContent) {
         didSelectContent = _selectBlockAt(docPosition);
@@ -458,6 +473,7 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
         SelectionChangeType.placeCaret,
         SelectionReason.userInteraction,
       ),
+      const ClearComposingRegionRequest(),
     ]);
   }
 
@@ -535,8 +551,11 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
   void _onDragEnd() {
     setState(() {
       _dragStartGlobal = null;
+      _dragSelectionBase = null;
       _dragEndGlobal = null;
       _expandSelectionDuringDrag = false;
+      _wordSelectionUpstream = null;
+      _wordSelectionDownstream = null;
     });
 
     widget.autoScroller.disableAutoScrolling();
@@ -556,13 +575,6 @@ class _DocumentMouseInteractorState extends State<DocumentMouseInteractor> with 
     if (event is PointerScrollEvent) {
       _scrollVertically(event.scrollDelta.dy);
     }
-  }
-
-  /// Beginning with Flutter 3.3.3, we are responsible for starting and
-  /// stopping scroll momentum. This method cancels any scroll momentum
-  /// in our scroll controller.
-  void _cancelScrollMomentum() {
-    widget.autoScroller.goIdle();
   }
 
   void _updateDragSelection() {
@@ -608,7 +620,10 @@ Updating drag selection:
       baseOffsetInDocument,
       extentOffsetInDocument,
     );
-    DocumentPosition? basePosition = selection?.base;
+
+    _dragSelectionBase ??= selection?.base;
+
+    DocumentPosition? basePosition = _dragSelectionBase;
     DocumentPosition? extentPosition = selection?.extent;
     editorGesturesLog.fine(" - base: $basePosition, extent: $extentPosition");
 
@@ -642,15 +657,14 @@ Updating drag selection:
           ? extentParagraphSelection.extent
           : extentParagraphSelection.base;
     } else if (selectionType == SelectionType.word) {
-      final baseWordSelection = getWordSelection(
-        docPosition: basePosition,
-        docLayout: documentLayout,
+      final dragDirection = widget.document.getAffinityBetween(
+        base: _wordSelectionUpstream!,
+        extent: selection!.extent,
       );
-      if (baseWordSelection == null) {
-        _clearSelection();
-        return;
-      }
-      basePosition = baseWordSelection.base;
+
+      basePosition = dragDirection == TextAffinity.downstream //
+          ? _wordSelectionUpstream!
+          : _wordSelectionDownstream!;
 
       final extentWordSelection = getWordSelection(
         docPosition: extentPosition,
@@ -660,7 +674,9 @@ Updating drag selection:
         _clearSelection();
         return;
       }
-      extentPosition = extentWordSelection.extent;
+      extentPosition = dragDirection == TextAffinity.downstream //
+          ? extentWordSelection.end
+          : extentWordSelection.start;
     }
 
     widget.editor.execute([
@@ -682,6 +698,7 @@ Updating drag selection:
     editorGesturesLog.fine("Clearing document selection");
     widget.editor.execute([
       const ClearSelectionRequest(),
+      const ClearComposingRegionRequest(),
     ]);
   }
 
@@ -705,7 +722,6 @@ Updating drag selection:
   }
 
   void _onMouseMove(PointerHoverEvent event) {
-    _cancelScrollMomentum();
     _updateMouseCursor(event.position);
     _lastHoverOffset = event.position;
   }
@@ -734,8 +750,6 @@ Updating drag selection:
     return Listener(
       onPointerSignal: _scrollOnMouseWheel,
       onPointerHover: _onMouseMove,
-      onPointerDown: (event) => _cancelScrollMomentum(),
-      onPointerPanZoomStart: (event) => _cancelScrollMomentum(),
       child: _buildCursorStyle(
         child: _buildGestureInput(
           child: widget.child ?? const SizedBox(),

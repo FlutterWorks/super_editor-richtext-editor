@@ -112,7 +112,7 @@ class AttributedText {
     while (index <= range.end && attributionsThroughout.isNotEmpty) {
       final missingAttributions = <Attribution>{};
       for (final attribution in attributionsThroughout) {
-        if (!hasAttributionAt(index)) {
+        if (!hasAttributionAt(index, attribution: attribution)) {
           missingAttributions.add(attribution);
         }
       }
@@ -449,6 +449,14 @@ class AttributedText {
   /// Attribution groups are useful when computing all style variations for [AttributedText].
   Iterable<MultiAttributionSpan> computeAttributionSpans() {
     return spans.collapseSpans(contentLength: text.length);
+  }
+
+  /// Returns a copy of this [AttributedText].
+  AttributedText copy() {
+    return AttributedText(
+      text,
+      spans.copy(),
+    );
   }
 
   @override

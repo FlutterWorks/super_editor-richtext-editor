@@ -2,6 +2,7 @@ import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/material.dart';
 import 'package:super_editor/src/core/document.dart';
 import 'package:super_editor/src/core/document_layout.dart';
+import 'package:super_editor/src/core/document_selection.dart';
 import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/content_layers.dart';
 
@@ -54,7 +55,7 @@ class _AttributionBoundsState extends ContentLayerState<AttributionBounds, List<
   }
 
   @override
-  List<AttributionBoundsLayout>? computeLayoutData(RenderObject? contentLayout) {
+  List<AttributionBoundsLayout>? computeLayoutData(Element? contentElement, RenderObject? contentLayout) {
     final bounds = <AttributionBoundsLayout>[];
 
     for (final node in widget.document.nodes) {
@@ -64,7 +65,7 @@ class _AttributionBoundsState extends ContentLayerState<AttributionBounds, List<
 
       final spans = node.text.getAttributionSpansInRange(
         attributionFilter: widget.selector,
-        range: SpanRange(0, node.text.text.length - 1),
+        range: SpanRange(0, node.text.length - 1),
       );
 
       for (final span in spans) {

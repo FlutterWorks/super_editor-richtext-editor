@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
 import 'package:super_editor/src/infrastructure/multi_listenable_builder.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/platforms/android/magnifier.dart';
@@ -115,6 +116,13 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   // handle appears below the selected line of text, not within the
   // line of text.
   Offset? _touchHandleOffsetFromLineOfText;
+  // Whether the scroll offset has changed this frame, while dragging
+  // a handle. If it has, then we need to compute a new selection based
+  // on the handle location and the new scroll offset. However, we only
+  // want to do that once per frame to prevent cyclical calls between
+  // the text editing controller and the scroll controller. This property
+  // is used to make sure we only sync them once per frame.
+  bool _needToSyncSelectionWithHandleLocation = false;
 
   bool get _shouldShowCollapsedHandle =>
       widget.editingController.textController.selection.isCollapsed && !_isDraggingBase && !_isDraggingExtent;
@@ -184,9 +192,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   void _onCollapsedPanStart(DragStartDetails details) {
     _log.fine('_onCollapsedPanStart');
 
-    widget.editingController
-      ..hideToolbar()
-      ..cancelCollapsedHandleAutoHideCountdown();
+    _onHandleDragStart();
 
     // TODO: de-dup the calculation of the mid-line focal point
     final globalOffsetInMiddleOfLine =
@@ -198,7 +204,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
       userInteractionOffsetInViewport: (widget.textFieldKey.currentContext!.findRenderObject() as RenderBox)
           .globalToLocal(globalOffsetInMiddleOfLine),
     );
-    widget.textScrollController.addListener(_updateSelectionForNewDragHandleLocation);
+    widget.textScrollController.addListener(_updateSelectionForDragHandleAfterScrollChange);
 
     setState(() {
       _isDraggingCollapsed = true;
@@ -211,8 +217,16 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     });
   }
 
+  void _onHandleTap(HandleType handleType) {
+    if (handleType == HandleType.collapsed) {
+      widget.editingController.toggleToolbar();
+    }
+  }
+
   void _onBasePanStart(DragStartDetails details) {
     _log.fine('_onBasePanStart');
+
+    _onHandleDragStart();
 
     // TODO: de-dup the calculation of the mid-line focal point
     final globalOffsetInMiddleOfLine =
@@ -220,17 +234,12 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     _touchHandleOffsetFromLineOfText = globalOffsetInMiddleOfLine - details.globalPosition;
     _log.fine(' - global offset in middle of line: $globalOffsetInMiddleOfLine');
 
-    widget.editingController
-      ..hideToolbar()
-      ..cancelCollapsedHandleAutoHideCountdown();
-    _log.fine(' - hid the toolbar, cancelled countdown timer');
-
     // TODO: de-dup the repeated calculations of the effective focal point: globalPosition + _touchHandleOffsetFromLineOfText
     widget.textScrollController.updateAutoScrollingForTouchOffset(
       userInteractionOffsetInViewport: (widget.textFieldKey.currentContext!.findRenderObject() as RenderBox)
           .globalToLocal(details.globalPosition + _touchHandleOffsetFromLineOfText!),
     );
-    widget.textScrollController.addListener(_updateSelectionForNewDragHandleLocation);
+    widget.textScrollController.addListener(_updateSelectionForDragHandleAfterScrollChange);
     _log.fine(' - updated auto scrolling for touch offset');
 
     setState(() {
@@ -248,21 +257,19 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   void _onExtentPanStart(DragStartDetails details) {
     _log.fine('_onExtentPanStart');
 
+    _onHandleDragStart();
+
     // TODO: de-dup the calculation of the mid-line focal point
     final globalOffsetInMiddleOfLine =
         _getGlobalOffsetOfMiddleOfLine(widget.editingController.textController.selection.extent);
     _touchHandleOffsetFromLineOfText = globalOffsetInMiddleOfLine - details.globalPosition;
-
-    widget.editingController
-      ..hideToolbar()
-      ..cancelCollapsedHandleAutoHideCountdown();
 
     // TODO: de-dup the repeated calculations of the effective focal point: globalPosition + _touchHandleOffsetFromLineOfText
     widget.textScrollController.updateAutoScrollingForTouchOffset(
       userInteractionOffsetInViewport: (widget.textFieldKey.currentContext!.findRenderObject() as RenderBox)
           .globalToLocal(details.globalPosition + _touchHandleOffsetFromLineOfText!),
     );
-    widget.textScrollController.addListener(_updateSelectionForNewDragHandleLocation);
+    widget.textScrollController.addListener(_updateSelectionForDragHandleAfterScrollChange);
 
     setState(() {
       _isDraggingCollapsed = false;
@@ -272,13 +279,27 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     });
   }
 
+  void _onHandleDragStart() {
+    _log.fine('_onHandleDragStart()');
+
+    widget.editingController
+      ..hideToolbar()
+      ..cancelCollapsedHandleAutoHideCountdown();
+    _log.fine(' - hid the toolbar, cancelled countdown timer');
+
+    if (widget.editingController.textController.selection.isCollapsed) {
+      // The user is dragging the handle. Stop the caret from blinking while dragging.
+      widget.editingController.stopCaretBlinking();
+    }
+  }
+
   void _onPanUpdate(DragUpdateDetails details) {
     _log.fine('_onPanUpdate');
 
     // Must set global drag offset before _updateSelectionForNewDragHandleLocation()
     _globalDragOffset = details.globalPosition;
     _log.fine(' - global offset: $_globalDragOffset');
-    _updateSelectionForNewDragHandleLocation();
+    _updateSelectionForCurrentDragHandleOffset();
     _log.fine(' - done updating selection for new drag handle location');
 
     // TODO: de-dup the repeated calculations of the effective focal point: globalPosition + _touchHandleOffsetFromLineOfText
@@ -291,11 +312,34 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
     setState(() {
       _localDragOffset = _localDragOffset! + details.delta;
       widget.editingController.showMagnifier(_localDragOffset!);
+
       _log.fine(' - done updating all local state for drag update');
     });
   }
 
-  void _updateSelectionForNewDragHandleLocation() {
+  /// Calculates a new text selection based on the handle that the user is dragging
+  /// as well as the current scroll offset, at the end of the current frame.
+  ///
+  /// This method should be called whenever the scroll controller changes while
+  /// dragging a handle.
+  ///
+  /// This method waits until the end of the frame to calculate a new text selection
+  /// so that we don't end up with infinite calls between the scroll controller changing
+  /// and the text editing controller changing, i.e., we throttle the selection changes.
+  void _updateSelectionForDragHandleAfterScrollChange() {
+    _needToSyncSelectionWithHandleLocation = true;
+
+    onNextFrame((timeStamp) {
+      if (!_needToSyncSelectionWithHandleLocation) {
+        return;
+      }
+
+      _updateSelectionForCurrentDragHandleOffset();
+      _needToSyncSelectionWithHandleLocation = false;
+    });
+  }
+
+  void _updateSelectionForCurrentDragHandleOffset() {
     final textBox = (widget.textContentKey.currentContext!.findRenderObject() as RenderBox);
     final textOffset = textBox.globalToLocal(_globalDragOffset! + _touchHandleOffsetFromLineOfText!);
     final textLayout = widget.textContentKey.currentState!.textLayout;
@@ -328,7 +372,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
   void _onHandleDragEnd() {
     _log.fine('_onHandleDragEnd()');
     widget.textScrollController.stopScrolling();
-    widget.textScrollController.removeListener(_updateSelectionForNewDragHandleLocation);
+    widget.textScrollController.removeListener(_updateSelectionForDragHandleAfterScrollChange);
 
     // TODO: ensure that extent is visible
 
@@ -343,6 +387,10 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
         // expanded, show it again.
         widget.editingController.showToolbar();
       } else {
+        // The user stopped dragging a handle and the selection is collapsed.
+        // Start the caret blinking again.
+        widget.editingController.startCaretBlinking();
+
         // The collapsed handle should disappear after some inactivity.
         widget.editingController
           ..unHideCollapsedHandle()
@@ -687,7 +735,9 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
       child: FractionalTranslation(
         translation: fractionalTranslation,
         child: GestureDetector(
+          dragStartBehavior: DragStartBehavior.down,
           behavior: HitTestBehavior.translucent,
+          onTap: () => _onHandleTap(handleType),
           onPanStart: onPanStart,
           onPanUpdate: _onPanUpdate,
           onPanEnd: _onPanEnd,
@@ -767,6 +817,7 @@ class _AndroidEditingOverlayControlsState extends State<AndroidEditingOverlayCon
 class AndroidEditingOverlayController with ChangeNotifier {
   AndroidEditingOverlayController({
     required this.textController,
+    required this.caretBlinkController,
     required LayerLink magnifierFocalPoint,
   }) : _magnifierFocalPoint = magnifierFocalPoint;
 
@@ -789,6 +840,18 @@ class AndroidEditingOverlayController with ChangeNotifier {
   /// selection. Those properties and behaviors are represented by
   /// this [textController].
   final AttributedTextEditingController textController;
+
+  final BlinkController caretBlinkController;
+
+  /// Starts the text field caret blinking.
+  void startCaretBlinking() {
+    caretBlinkController.startBlinking();
+  }
+
+  /// Stops the text field caret blinking.
+  void stopCaretBlinking() {
+    caretBlinkController.stopBlinking();
+  }
 
   void toggleToolbar() {
     if (isToolbarVisible) {

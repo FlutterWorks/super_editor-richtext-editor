@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:super_editor/src/default_editor/document_scrollable.dart';
 import 'package:super_editor/src/test/super_reader_test/super_reader_inspector.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor_markdown/super_editor_markdown.dart';
@@ -61,6 +60,13 @@ class TestDocumentSelector {
     );
   }
 
+  TestDocumentConfigurator withSingleParagraphShort() {
+    return TestDocumentConfigurator._(
+      _widgetTester,
+      singleParagraphShortDoc(),
+    );
+  }
+
   TestDocumentConfigurator withTwoEmptyParagraphs() {
     return TestDocumentConfigurator._(
       _widgetTester,
@@ -84,15 +90,20 @@ class TestDocumentConfigurator {
   final MutableDocument? _document;
   DocumentGestureMode? _gestureMode;
   ThemeData? _appTheme;
+  SelectionStyles? _selectionStyles;
   Stylesheet? _stylesheet;
   final _addedComponents = <ComponentBuilder>[];
-  bool _autoFocus = false;
   ui.Size? _editorSize;
   List<ComponentBuilder>? _componentBuilders;
   WidgetTreeBuilder? _widgetTreeBuilder;
   ScrollController? _scrollController;
+  bool _insideCustomScrollView = false;
   FocusNode? _focusNode;
+  bool _autoFocus = false;
+  String? _tapRegionGroupId;
   DocumentSelection? _selection;
+  WidgetBuilder? _androidToolbarBuilder;
+  DocumentFloatingToolbarBuilder? _iOSToolbarBuilder;
 
   /// Configures the [SuperReader] for standard desktop interactions,
   /// e.g., mouse and keyboard input.
@@ -175,10 +186,29 @@ class TestDocumentConfigurator {
     }
   }
 
+  /// Configures the [SuperEditor] to use the given [builder] as its android toolbar builder.
+  TestDocumentConfigurator withAndroidToolbarBuilder(WidgetBuilder? builder) {
+    _androidToolbarBuilder = builder;
+    return this;
+  }
+
+  /// Configures the [SuperEditor] to use the given [builder] as its iOS toolbar builder.
+  TestDocumentConfigurator withiOSToolbarBuilder(DocumentFloatingToolbarBuilder? builder) {
+    _iOSToolbarBuilder = builder;
+    return this;
+  }
+
   /// Configures the [ThemeData] used for the [MaterialApp] that wraps
   /// the [SuperReader].
   TestDocumentConfigurator useAppTheme(ThemeData theme) {
     _appTheme = theme;
+    return this;
+  }
+
+  /// Configures the [SuperReader] with the given selection [styles], which dictate the color of the
+  /// primary user's selection, and related selection details.
+  TestDocumentConfigurator withSelectionStyles(SelectionStyles? styles) {
+    _selectionStyles = styles;
     return this;
   }
 
@@ -201,6 +231,24 @@ class TestDocumentConfigurator {
     return this;
   }
 
+  /// Configures the [SuperReader] to be displayed inside a [CustomScrollView].
+  ///
+  /// The [CustomScrollView] is constrained by the size provided in [withEditorSize].
+  ///
+  /// Use [withScrollController] to define the [ScrollController] of the [CustomScrollView].
+  TestDocumentConfigurator insideCustomScrollView() {
+    _insideCustomScrollView = true;
+    return this;
+  }
+
+  /// Configures the [SuperReader] to use the given [tapRegionGroupId].
+  ///
+  /// This DOESN'T wrap the reader with a [TapRegion].
+  TestDocumentConfigurator withTapRegionGroupId(String? tapRegionGroupId) {
+    _tapRegionGroupId = tapRegionGroupId;
+    return this;
+  }
+
   /// Pumps a [SuperReader] widget tree with the desired configuration, and returns
   /// a [TestDocumentContext], which includes the artifacts connected to the widget
   /// tree, e.g., the [DocumentEditor], [DocumentComposer], etc.
@@ -212,7 +260,7 @@ class TestDocumentConfigurator {
       document: _document!,
       getDocumentLayout: () => layoutKey.currentState as DocumentLayout,
       selection: ValueNotifier<DocumentSelection?>(_selection),
-      scrollController: AutoScrollController(),
+      scroller: DocumentScroller(),
     );
     final testContext = TestDocumentContext._(
       focusNode: _focusNode ?? FocusNode(),
@@ -221,20 +269,30 @@ class TestDocumentConfigurator {
       documentContext: documentContext,
     );
 
-    final superDocument = _buildContent(
-      SuperReader(
-        focusNode: testContext.focusNode,
-        document: documentContext.document,
-        documentLayoutKey: layoutKey,
-        selection: documentContext.selection,
-        gestureMode: _gestureMode ?? _defaultGestureMode,
-        stylesheet: _stylesheet,
-        componentBuilders: [
-          ..._addedComponents,
-          ...(_componentBuilders ?? defaultComponentBuilders),
-        ],
-        autofocus: _autoFocus,
-        scrollController: _scrollController,
+    final superDocument = _buildConstrainedContent(
+      _buildAncestorScrollable(
+        child: SuperReaderIosControlsScope(
+          controller: SuperReaderIosControlsController(
+            toolbarBuilder: _iOSToolbarBuilder,
+          ),
+          child: SuperReader(
+            focusNode: testContext.focusNode,
+            autofocus: _autoFocus,
+            tapRegionGroupId: _tapRegionGroupId,
+            document: documentContext.document,
+            documentLayoutKey: layoutKey,
+            selection: documentContext.selection,
+            selectionStyle: _selectionStyles,
+            gestureMode: _gestureMode ?? _defaultGestureMode,
+            stylesheet: _stylesheet,
+            componentBuilders: [
+              ..._addedComponents,
+              ...(_componentBuilders ?? defaultComponentBuilders),
+            ],
+            scrollController: _scrollController,
+            androidToolbarBuilder: _androidToolbarBuilder,
+          ),
+        ),
       ),
     );
 
@@ -245,7 +303,7 @@ class TestDocumentConfigurator {
     return testContext;
   }
 
-  Widget _buildContent(Widget superReader) {
+  Widget _buildConstrainedContent(Widget superReader) {
     if (_editorSize != null) {
       return ConstrainedBox(
         constraints: BoxConstraints(
@@ -258,6 +316,22 @@ class TestDocumentConfigurator {
     return superReader;
   }
 
+  /// Places [child] inside a [CustomScrollView], based on configurations in this class.
+  Widget _buildAncestorScrollable({required Widget child}) {
+    if (!_insideCustomScrollView) {
+      return child;
+    }
+
+    return CustomScrollView(
+      controller: _scrollController,
+      slivers: [
+        SliverToBoxAdapter(
+          child: child,
+        ),
+      ],
+    );
+  }
+
   Widget _buildWidgetTree(Widget superReader) {
     if (_widgetTreeBuilder != null) {
       return _widgetTreeBuilder!(superReader);
@@ -267,6 +341,7 @@ class TestDocumentConfigurator {
       home: Scaffold(
         body: superReader,
       ),
+      debugShowCheckedModeBanner: false,
     );
   }
 }

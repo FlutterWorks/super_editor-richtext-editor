@@ -966,7 +966,7 @@ class CommonEditorOperations {
       return false;
     }
 
-    final firstNodeTextLength = node.text.text.length;
+    final firstNodeTextLength = node.text.length;
 
     // Send edit command.
     editor.execute([
@@ -1003,7 +1003,7 @@ class CommonEditorOperations {
     final textNode = document.getNode(composer.selection!.extent) as TextNode;
     final text = textNode.text;
     final currentTextOffset = (composer.selection!.extent.nodePosition as TextNodePosition).offset;
-    if (currentTextOffset >= text.text.length) {
+    if (currentTextOffset >= text.length) {
       return false;
     }
 
@@ -1011,8 +1011,8 @@ class CommonEditorOperations {
 
     // Delete the selected content.
     editor.execute([
-      DeleteSelectionRequest(
-        documentSelection: textNode.selectionBetween(
+      DeleteContentRequest(
+        documentRange: textNode.selectionBetween(
           currentTextOffset,
           nextCharacterOffset,
         ),
@@ -1181,7 +1181,7 @@ class CommonEditorOperations {
       return false;
     }
 
-    final aboveParagraphLength = nodeAbove.text.text.length;
+    final aboveParagraphLength = nodeAbove.text.length;
 
     // Send edit command.
     editor.execute([
@@ -1227,8 +1227,8 @@ class CommonEditorOperations {
 
     // Delete the selected content.
     editor.execute([
-      DeleteSelectionRequest(
-        documentSelection: textNode.selectionBetween(
+      DeleteContentRequest(
+        documentRange: textNode.selectionBetween(
           currentTextOffset,
           previousCharacterOffset,
         ),
@@ -1281,7 +1281,7 @@ class CommonEditorOperations {
 
     // Delete the selected content.
     editor.execute([
-      DeleteSelectionRequest(documentSelection: composer.selection!),
+      DeleteContentRequest(documentRange: composer.selection!),
       ChangeSelectionRequest(
         DocumentSelection.collapsed(position: newSelectionPosition),
         SelectionChangeType.deleteContent,
@@ -1335,11 +1335,11 @@ class CommonEditorOperations {
 
     if (baseNodeIndex != extentNodeIndex) {
       if (topNodePosition == topNode.beginningPosition && bottomNodePosition == bottomNode.endPosition) {
-        // All nodes in the selection will be deleted. Assume that the base
+        // All nodes in the selection will be deleted. Assume that the start
         // node will be retained and converted into a paragraph, if it's not
         // already a paragraph.
         newSelectionPosition = DocumentPosition(
-          nodeId: baseNode.id,
+          nodeId: topNode.id,
           nodePosition: const TextNodePosition(offset: 0),
         );
       } else if (topNodePosition == topNode.beginningPosition) {
@@ -1417,7 +1417,7 @@ class CommonEditorOperations {
 
     editor.execute([
       AddTextAttributionsRequest(
-        documentSelection: composer.selection!,
+        documentRange: composer.selection!,
         attributions: attributions,
       ),
     ]);
@@ -1441,7 +1441,7 @@ class CommonEditorOperations {
 
     editor.execute([
       RemoveTextAttributionsRequest(
-        documentSelection: composer.selection!,
+        documentRange: composer.selection!,
         attributions: attributions,
       ),
     ]);
@@ -1465,7 +1465,7 @@ class CommonEditorOperations {
 
     editor.execute([
       ToggleTextAttributionsRequest(
-        documentSelection: composer.selection!,
+        documentRange: composer.selection!,
         attributions: attributions,
       ),
     ]);
@@ -2195,7 +2195,7 @@ class CommonEditorOperations {
 
       // Delete the selected content.
       editor.execute([
-        DeleteSelectionRequest(documentSelection: composer.selection!),
+        DeleteContentRequest(documentRange: composer.selection!),
         ChangeSelectionRequest(
           DocumentSelection.collapsed(position: pastePosition),
           SelectionChangeType.deleteContent,
@@ -2380,7 +2380,7 @@ class PasteEditorCommand implements EditCommand {
 
       if (link != null && link.hasScheme && link.hasAuthority) {
         // Valid url. Apply [LinkAttribution] to the url
-        final linkAttribution = LinkAttribution(url: link);
+        final linkAttribution = LinkAttribution.fromUri(link);
 
         final startOffset = wordBoundary.start;
         // -1 because TextPosition's offset indexes the character after the
@@ -2444,8 +2444,8 @@ class DeleteUpstreamCharacterCommand implements EditCommand {
     // Delete the selected content.
     executor
       ..executeCommand(
-        DeleteSelectionCommand(
-          documentSelection: textNode.selectionBetween(
+        DeleteContentCommand(
+          documentRange: textNode.selectionBetween(
             currentTextOffset,
             previousCharacterOffset,
           ),
@@ -2487,7 +2487,7 @@ class DeleteDownstreamCharacterCommand implements EditCommand {
     final textNode = document.getNode(selection.extent) as TextNode;
     final text = textNode.text;
     final currentTextPositionOffset = (selection.extent.nodePosition as TextNodePosition).offset;
-    if (currentTextPositionOffset >= text.text.length) {
+    if (currentTextPositionOffset >= text.length) {
       throw Exception("Tried to delete downstream character but the caret is sitting at the end of the text.");
     }
 
@@ -2495,8 +2495,8 @@ class DeleteDownstreamCharacterCommand implements EditCommand {
 
     // Delete the selected content.
     executor.executeCommand(
-      DeleteSelectionCommand(
-        documentSelection: textNode.selectionBetween(
+      DeleteContentCommand(
+        documentRange: textNode.selectionBetween(
           currentTextPositionOffset,
           nextCharacterOffset,
         ),

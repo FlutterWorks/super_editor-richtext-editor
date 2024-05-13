@@ -64,7 +64,7 @@ final taskStyles = StyleRule(
     }
 
     return {
-      "padding": const CascadingPadding.only(top: 24),
+      Styles.padding: const CascadingPadding.only(top: 24),
     };
   },
 );
@@ -134,6 +134,8 @@ class TaskComponentViewModel extends SingleColumnLayoutComponentViewModel with T
     this.selection,
     required this.selectionColor,
     this.highlightWhenEmpty = false,
+    this.composingRegion,
+    this.showComposingUnderline = false,
   }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
 
   bool isComplete;
@@ -153,6 +155,10 @@ class TaskComponentViewModel extends SingleColumnLayoutComponentViewModel with T
   Color selectionColor;
   @override
   bool highlightWhenEmpty;
+  @override
+  TextRange? composingRegion;
+  @override
+  bool showComposingUnderline;
 
   @override
   TaskComponentViewModel copy() {
@@ -168,6 +174,8 @@ class TaskComponentViewModel extends SingleColumnLayoutComponentViewModel with T
       selection: selection,
       selectionColor: selectionColor,
       highlightWhenEmpty: highlightWhenEmpty,
+      composingRegion: composingRegion,
+      showComposingUnderline: showComposingUnderline,
     );
   }
 
@@ -178,25 +186,27 @@ class TaskComponentViewModel extends SingleColumnLayoutComponentViewModel with T
           other is TaskComponentViewModel &&
           runtimeType == other.runtimeType &&
           isComplete == other.isComplete &&
-          setComplete == other.setComplete &&
           text == other.text &&
           textDirection == other.textDirection &&
           textAlignment == other.textAlignment &&
           selection == other.selection &&
           selectionColor == other.selectionColor &&
-          highlightWhenEmpty == other.highlightWhenEmpty;
+          highlightWhenEmpty == other.highlightWhenEmpty &&
+          composingRegion == other.composingRegion &&
+          showComposingUnderline == other.showComposingUnderline;
 
   @override
   int get hashCode =>
       super.hashCode ^
       isComplete.hashCode ^
-      setComplete.hashCode ^
       text.hashCode ^
       textDirection.hashCode ^
       textAlignment.hashCode ^
       selection.hashCode ^
       selectionColor.hashCode ^
-      highlightWhenEmpty.hashCode;
+      highlightWhenEmpty.hashCode ^
+      composingRegion.hashCode ^
+      showComposingUnderline.hashCode;
 }
 
 /// A document component that displays a complete-able task.
@@ -230,6 +240,19 @@ class _TaskComponentState extends State<TaskComponent> with ProxyDocumentCompone
   @override
   TextComposable get childTextComposable => childDocumentComponentKey.currentState as TextComposable;
 
+  /// Computes the [TextStyle] for this task's inner [TextComponent].
+  TextStyle _computeStyles(Set<Attribution> attributions) {
+    // Show a strikethrough across the entire task if it's complete.
+    final style = widget.viewModel.textStyleBuilder(attributions);
+    return widget.viewModel.isComplete
+        ? style.copyWith(
+            decoration: style.decoration == null
+                ? TextDecoration.lineThrough
+                : TextDecoration.combine([TextDecoration.lineThrough, style.decoration!]),
+          )
+        : style;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Row(
@@ -248,20 +271,12 @@ class _TaskComponentState extends State<TaskComponent> with ProxyDocumentCompone
           child: TextComponent(
             key: _textKey,
             text: widget.viewModel.text,
-            textStyleBuilder: (attributions) {
-              // Show a strikethrough across the entire task if it's complete.
-              final style = widget.viewModel.textStyleBuilder(attributions);
-              return widget.viewModel.isComplete
-                  ? style.copyWith(
-                      decoration: style.decoration == null
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.combine([TextDecoration.lineThrough, style.decoration!]),
-                    )
-                  : style;
-            },
+            textStyleBuilder: _computeStyles,
             textSelection: widget.viewModel.selection,
             selectionColor: widget.viewModel.selectionColor,
             highlightWhenEmpty: widget.viewModel.highlightWhenEmpty,
+            composingRegion: widget.viewModel.composingRegion,
+            showComposingUnderline: widget.viewModel.showComposingUnderline,
             showDebugPaint: widget.showDebugPaint,
           ),
         ),
@@ -272,9 +287,9 @@ class _TaskComponentState extends State<TaskComponent> with ProxyDocumentCompone
 
 ExecutionInstruction enterToInsertNewTask({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -309,9 +324,9 @@ ExecutionInstruction enterToInsertNewTask({
 
 ExecutionInstruction backspaceToConvertTaskToParagraph({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -509,7 +524,7 @@ class SplitExistingTaskCommand implements EditCommand {
     }
 
     // Ensure the split offset is valid.
-    if (splitOffset < 0 || splitOffset > node.text.text.length + 1) {
+    if (splitOffset < 0 || splitOffset > node.text.length + 1) {
       return;
     }
 
@@ -520,7 +535,7 @@ class SplitExistingTaskCommand implements EditCommand {
     );
 
     // Remove the text after the caret from the currently selected TaskNode.
-    node.text = node.text.removeRegion(startOffset: splitOffset, endOffset: node.text.text.length);
+    node.text = node.text.removeRegion(startOffset: splitOffset, endOffset: node.text.length);
 
     // Insert a new TextNode after the currently selected TaskNode.
     document.insertNodeAfter(existingNode: node, newNode: newTaskNode);
@@ -539,6 +554,7 @@ class SplitExistingTaskCommand implements EditCommand {
     composer.setComposingRegion(null);
 
     executor.logChanges([
+      SplitTaskIntention.start(),
       DocumentEdit(
         NodeChangeEvent(node.id),
       ),
@@ -548,11 +564,20 @@ class SplitExistingTaskCommand implements EditCommand {
       SelectionChangeEvent(
         oldSelection: oldSelection,
         newSelection: newSelection,
-        oldComposingRegion: oldComposingRegion,
-        newComposingRegion: null,
         changeType: SelectionChangeType.pushCaret,
         reason: SelectionReason.userInteraction,
       ),
+      ComposingRegionChangeEvent(
+        oldComposingRegion: oldComposingRegion,
+        newComposingRegion: null,
+      ),
+      SplitTaskIntention.end(),
     ]);
   }
+}
+
+class SplitTaskIntention extends Intention {
+  SplitTaskIntention.start() : super.start();
+
+  SplitTaskIntention.end() : super.end();
 }

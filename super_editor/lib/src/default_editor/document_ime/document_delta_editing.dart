@@ -14,6 +14,7 @@ import 'package:super_editor/src/default_editor/selection_upstream_downstream.da
 import 'package:super_editor/src/default_editor/tasks.dart';
 import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
+import 'package:super_editor/src/infrastructure/platforms/platform.dart';
 
 import 'document_serialization.dart';
 
@@ -67,6 +68,7 @@ class TextDeltasDocumentEditor {
       selection: selection.value != null
           ? _serializedDoc.documentToImeSelection(selection.value!)
           : const TextSelection.collapsed(offset: -1),
+      composing: _serializedDoc.documentToImeRange(_serializedDoc.composingRegion),
     );
 
     for (final delta in textEditingDeltas) {
@@ -96,9 +98,12 @@ class TextDeltasDocumentEditor {
     // the IME composing region.
     editorImeLog.fine("After applying all deltas, converting the final composing region to a document range.");
     editorImeLog.fine("Raw IME delta composing region: ${textEditingDeltas.last.composing}");
+
+    DocumentRange? docComposingRegion = _calculateNewComposingRegion(textEditingDeltas);
+
     editor.execute([
       ChangeComposingRegionRequest(
-        _serializedDoc.imeToDocumentRange(textEditingDeltas.last.composing),
+        docComposingRegion,
       ),
     ]);
     editorImeLog.fine("Document composing region: ${composingRegion.value}");
@@ -143,18 +148,31 @@ class TextDeltasDocumentEditor {
     editorImeLog.fine(
         "Inserting text: '${delta.textInserted}', at insertion offset: ${delta.insertionOffset}, with ime selection: ${delta.selection}");
 
+    final insertionPosition = TextPosition(
+      offset: delta.insertionOffset,
+      affinity: delta.selection.affinity,
+    );
+
+    if (delta.textInserted == ' ' && _serializedDoc.isPositionInsidePlaceholder(insertionPosition)) {
+      // The IME is trying to insert a space inside the invisible range. This is a situation that happens
+      // on iOS when the user is composing a character at the beginning of a node using a korean keyboard.
+      // The IME deletes the first visible character and the space from the invisible characters,
+      // them it inserts the space back. We already adjust the deletion to avoid deleting the invisible space,
+      // so we should ignore this insertion.
+      //
+      // For more information, see #1828.
+      return;
+    }
+
     editorImeLog.fine("Converting IME insertion offset into a DocumentSelection");
     final insertionSelection = _serializedDoc.imeToDocumentSelection(
-      TextSelection.fromPosition(TextPosition(
-        offset: delta.insertionOffset,
-        affinity: delta.selection.affinity,
-      )),
+      TextSelection.fromPosition(insertionPosition),
     )!;
-
-    insert(insertionSelection, delta.textInserted);
 
     // Update the local IME value that changes with each delta.
     _previousImeValue = delta.apply(_previousImeValue);
+
+    insert(insertionSelection, delta.textInserted);
 
     // Update the IME to document serialization based on the insertion changes.
     _serializedDoc = DocumentImeSerializer(
@@ -163,6 +181,13 @@ class TextDeltasDocumentEditor {
       composingRegion.value,
       _serializedDoc.didPrependPlaceholder ? PrependedCharacterPolicy.include : PrependedCharacterPolicy.exclude,
     )..imeText = _previousImeValue.text;
+
+    // The delta's composing region is based on the content after insertion, so we
+    // apply the composing region here instead of during insertion operation above.
+    final insertionComposingRegion = _serializedDoc.imeToDocumentRange(delta.composing);
+    editor.execute([
+      ChangeComposingRegionRequest(insertionComposingRegion),
+    ]);
   }
 
   void _applyReplacement(TextEditingDeltaReplacement delta) {
@@ -206,6 +231,13 @@ class TextDeltasDocumentEditor {
       composingRegion.value,
       _serializedDoc.didPrependPlaceholder ? PrependedCharacterPolicy.include : PrependedCharacterPolicy.exclude,
     )..imeText = _previousImeValue.text;
+
+    // The delta's composing region is based on the content after insertion, so we
+    // apply the composing region here instead of during the replacement operation above.
+    final insertionComposingRegion = _serializedDoc.imeToDocumentRange(delta.composing);
+    editor.execute([
+      ChangeComposingRegionRequest(insertionComposingRegion),
+    ]);
   }
 
   void _applyDeletion(TextEditingDeltaDeletion delta) {
@@ -229,7 +261,9 @@ class TextDeltasDocumentEditor {
     editorImeLog.fine("OS-side selection - ${delta.selection}");
     editorImeLog.fine("OS-side composing - ${delta.composing}");
 
-    final docSelection = _serializedDoc.imeToDocumentSelection(delta.selection);
+    DocumentSelection? docSelection = _calculateNewDocumentSelection(delta);
+    DocumentRange? docComposingRegion = _calculateNewComposingRegion([delta]);
+
     if (docSelection != null) {
       // We got a selection from the platform.
       // This could happen in some software keyboards, like GBoard,
@@ -240,6 +274,7 @@ class TextDeltasDocumentEditor {
           docSelection.isCollapsed ? SelectionChangeType.placeCaret : SelectionChangeType.expandSelection,
           SelectionReason.userInteraction,
         ),
+        ChangeComposingRegionRequest(docComposingRegion),
       ]);
     }
 
@@ -573,5 +608,40 @@ class TextDeltasDocumentEditor {
     // Update and add mapping from IME TextRanges to Document nodes.
     _serializedDoc.imeRangesToDocTextNodes[topImeToDocTextRange] = originNode.id;
     _serializedDoc.imeRangesToDocTextNodes[bottomImeToDocTextRange] = newNode.id;
+  }
+
+  DocumentSelection? _calculateNewDocumentSelection(TextEditingDelta delta) {
+    if (CurrentPlatform.isWeb &&
+        delta.selection.isCollapsed &&
+        _serializedDoc.isPositionInsidePlaceholder(delta.selection.extent)) {
+      // On web, pressing CMD + LEFT ARROW generates a non-text delta moving
+      // the selection to the first character. However, the first character is in a region
+      // invisible to the user. Adjust the document selection to be the first visible character.
+      // Expanded selection are already adjusted by the serializer.
+      return _serializedDoc.imeToDocumentSelection(
+        TextSelection.collapsed(
+          offset: _serializedDoc.firstVisiblePosition.offset,
+        ),
+      );
+    }
+    return _serializedDoc.imeToDocumentSelection(delta.selection);
+  }
+
+  DocumentRange? _calculateNewComposingRegion(List<TextEditingDelta> deltas) {
+    final lastDelta = deltas.last;
+    if (CurrentPlatform.isWeb &&
+        lastDelta.composing.isCollapsed &&
+        _serializedDoc.isPositionInsidePlaceholder(TextPosition(offset: lastDelta.composing.end))) {
+      // On web, pressing CMD + LEFT ARROW generates a non-text delta moving
+      // the selection, and possibly the composing region to the first character. However, the first character
+      // is in a region invisible to the user. Adjust the document composing region to be the first visible character.
+      // Expanded regions are already adjusted by the serializer.
+      return _serializedDoc.imeToDocumentRange(
+        TextRange.collapsed(
+          _serializedDoc.firstVisiblePosition.offset,
+        ),
+      );
+    }
+    return _serializedDoc.imeToDocumentRange(lastDelta.composing);
   }
 }

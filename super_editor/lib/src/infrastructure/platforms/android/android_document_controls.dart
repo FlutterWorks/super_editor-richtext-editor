@@ -1,8 +1,408 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:follow_the_leader/follow_the_leader.dart';
+import 'package:super_editor/src/core/document.dart';
+import 'package:super_editor/src/core/document_composer.dart';
+import 'package:super_editor/src/core/document_layout.dart';
+import 'package:super_editor/src/core/document_selection.dart';
+import 'package:super_editor/src/default_editor/document_gestures_touch_android.dart';
+import 'package:super_editor/src/infrastructure/_logging.dart';
+import 'package:super_editor/src/infrastructure/content_layers.dart';
+import 'package:super_editor/src/infrastructure/documents/document_layers.dart';
+import 'package:super_editor/src/infrastructure/documents/selection_leader_document_layer.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
 import 'package:super_editor/src/infrastructure/platforms/mobile_documents.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
+/// A document layer that positions a leader widget around the user's selection,
+/// as a focal point for an Android-style toolbar display.
+///
+/// By default, the toolbar focal point [LeaderLink] is obtained from an ancestor
+/// [SuperEditorAndroidControlsScope].
+class AndroidToolbarFocalPointDocumentLayer extends DocumentLayoutLayerStatefulWidget {
+  const AndroidToolbarFocalPointDocumentLayer({
+    Key? key,
+    required this.document,
+    required this.selection,
+    required this.toolbarFocalPointLink,
+    this.showDebugLeaderBounds = false,
+  }) : super(key: key);
+
+  /// The editor's [Document], which is used to find the start and end of
+  /// the user's expanded selection.
+  final Document document;
+
+  /// The current user's selection within a document.
+  final ValueListenable<DocumentSelection?> selection;
+
+  /// The [LeaderLink], which is attached to the toolbar focal point bounds.
+  ///
+  /// By default, this [LeaderLink] is obtained from an ancestor [SuperEditorAndroidControlsScope].
+  /// If [toolbarFocalPointLink] is non-null, it's used instead of the ancestor value.
+  final LeaderLink toolbarFocalPointLink;
+
+  /// Whether to paint colorful bounds around the leader widgets, for debugging purposes.
+  final bool showDebugLeaderBounds;
+
+  @override
+  DocumentLayoutLayerState<ContentLayerStatefulWidget, Rect> createState() =>
+      _AndroidToolbarFocalPointDocumentLayerState();
+}
+
+class _AndroidToolbarFocalPointDocumentLayerState
+    extends DocumentLayoutLayerState<AndroidToolbarFocalPointDocumentLayer, Rect> {
+  @override
+  void initState() {
+    super.initState();
+
+    widget.selection.addListener(_onSelectionChange);
+  }
+
+  @override
+  void didUpdateWidget(AndroidToolbarFocalPointDocumentLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.selection != oldWidget.selection) {
+      oldWidget.selection.removeListener(_onSelectionChange);
+      widget.selection.addListener(_onSelectionChange);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_onSelectionChange);
+
+    super.dispose();
+  }
+
+  void _onSelectionChange() {
+    // Re-calculate the selection visual bounds by running setState().
+    setStateAsSoonAsPossible(() {
+      // The selection bounds, and Leader build, will take place in methods that
+      // run in response to setState().
+    });
+  }
+
+  @override
+  Rect? computeLayoutDataWithDocumentLayout(BuildContext context, DocumentLayout documentLayout) {
+    final documentSelection = widget.selection.value;
+    if (documentSelection == null) {
+      return null;
+    }
+
+    final selectedComponent = documentLayout.getComponentByNodeId(widget.selection.value!.extent.nodeId);
+    if (selectedComponent == null) {
+      // Assume that we're in a momentary transitive state where the document layout
+      // just gained or lost a component. We expect this method to run again in a moment
+      // to correct for this.
+      return null;
+    }
+
+    return documentLayout.getRectForSelection(
+      documentSelection.base,
+      documentSelection.extent,
+    );
+  }
+
+  @override
+  Widget doBuild(BuildContext context, Rect? expandedSelectionBounds) {
+    if (expandedSelectionBounds == null) {
+      return const SizedBox();
+    }
+
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned.fromRect(
+            rect: expandedSelectionBounds,
+            child: Leader(
+              link: widget.toolbarFocalPointLink,
+              child: widget.showDebugLeaderBounds
+                  ? DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          width: 4,
+                          color: const Color(0xFFFF00FF),
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// TODO: should we de-dup AndroidHandlesDocumentLayer with the iOS version? It's mostly the same.
+
+/// A document layer that displays an Android-style caret, and positions [Leader]s for the Android
+/// collapsed and expanded drag handles.
+///
+/// This layer positions and paints the caret directly, rather than using `Leader`s and `Follower`s,
+/// because its position is based on the document layout, rather than the user's gesture behavior.
+class AndroidHandlesDocumentLayer extends DocumentLayoutLayerStatefulWidget {
+  const AndroidHandlesDocumentLayer({
+    super.key,
+    required this.document,
+    required this.documentLayout,
+    required this.selection,
+    required this.changeSelection,
+    this.caretColor,
+    this.showDebugPaint = false,
+  });
+
+  final Document document;
+
+  final DocumentLayout documentLayout;
+
+  final ValueListenable<DocumentSelection?> selection;
+
+  final void Function(DocumentSelection?, SelectionChangeType, String selectionReason) changeSelection;
+
+  /// Color used to render the Android-style caret (not handles), by default the color
+  /// is retrieved from the root [SuperEditorAndroidControlsController].
+  final Color? caretColor;
+
+  final bool showDebugPaint;
+
+  @override
+  DocumentLayoutLayerState<AndroidHandlesDocumentLayer, DocumentSelectionLayout> createState() =>
+      AndroidControlsDocumentLayerState();
+}
+
+@visibleForTesting
+class AndroidControlsDocumentLayerState
+    extends DocumentLayoutLayerState<AndroidHandlesDocumentLayer, DocumentSelectionLayout>
+    with SingleTickerProviderStateMixin {
+  late BlinkController _caretBlinkController;
+
+  SuperEditorAndroidControlsController? _controlsController;
+
+  DocumentSelection? _previousSelection;
+
+  @override
+  void initState() {
+    super.initState();
+    _caretBlinkController = BlinkController(tickerProvider: this);
+
+    _previousSelection = widget.selection.value;
+    widget.selection.addListener(_onSelectionChange);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    if (_controlsController != null) {
+      _controlsController!.shouldCaretBlink.removeListener(_onBlinkModeChange);
+      _controlsController!.caretJumpToOpaqueSignal.removeListener(_caretJumpToOpaque);
+      _controlsController!.shouldShowCollapsedHandle.removeListener(_onShouldShowCollapsedHandleChange);
+    }
+
+    _controlsController = SuperEditorAndroidControlsScope.rootOf(context);
+    _controlsController!.shouldCaretBlink.addListener(_onBlinkModeChange);
+    _controlsController!.caretJumpToOpaqueSignal.addListener(_caretJumpToOpaque);
+
+    /// Listen for changes about whether we want to show the collapsed handle
+    /// or whether we want to show expanded handles for a selection. We listen to
+    /// this because there are some situations where the desired handle type is
+    /// ambiguous, such as when when the user drags an expanded handle such that
+    /// the selection collapses. In that case, the selection is collapsed but we want
+    /// to show the expanded handle. This signal clarifies which one we want.
+    _controlsController!.shouldShowCollapsedHandle.addListener(_onShouldShowCollapsedHandleChange);
+    _onBlinkModeChange();
+  }
+
+  @override
+  void didUpdateWidget(AndroidHandlesDocumentLayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (widget.selection != oldWidget.selection) {
+      oldWidget.selection.removeListener(_onSelectionChange);
+      widget.selection.addListener(_onSelectionChange);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_onSelectionChange);
+    _controlsController?.shouldCaretBlink.removeListener(_onBlinkModeChange);
+    _controlsController!.shouldShowCollapsedHandle.removeListener(_onShouldShowCollapsedHandleChange);
+
+    _caretBlinkController.dispose();
+    super.dispose();
+  }
+
+  @visibleForTesting
+  Rect? get caret => layoutData?.caret;
+
+  @visibleForTesting
+  Color get caretColor => widget.caretColor ?? _controlsController?.controlsColor ?? Theme.of(context).primaryColor;
+
+  @visibleForTesting
+  bool get isCaretDisplayed => layoutData?.caret != null;
+
+  @visibleForTesting
+  bool get isCaretVisible => _caretBlinkController.opacity == 1.0 && isCaretDisplayed;
+
+  @visibleForTesting
+  Duration get caretFlashPeriod => _caretBlinkController.flashPeriod;
+
+  @visibleForTesting
+  bool get isUpstreamHandleDisplayed => layoutData?.upstream != null;
+
+  @visibleForTesting
+  bool get isDownstreamHandleDisplayed => layoutData?.downstream != null;
+
+  void _onSelectionChange() {
+    final newSelection = widget.selection.value;
+    if (newSelection != null && newSelection.isCollapsed) {
+      // Check for caret movement, because the caret should jump to opaque whenever it moves.
+      // This can happen when the user taps to move the caret, or when the user presses keyboard
+      // key sot move the caret.
+      if (_previousSelection != null &&
+          _previousSelection!.isCollapsed &&
+          !_previousSelection!.extent.isEquivalentTo(newSelection.extent)) {
+        // The caret moved from one place to another.
+        _controlsController!.jumpCaretToOpaque();
+      }
+      // Else, the selection went from null to non-null, or from caret to expanded. In these other
+      // cases, other areas of the system will ensure that the caret jumps to opaque.
+    }
+    _previousSelection = newSelection;
+
+    setState(() {
+      // Schedule a new layout computation because the caret and/or handles need to move.
+    });
+  }
+
+  void _onBlinkModeChange() {
+    if (_controlsController!.shouldCaretBlink.value) {
+      _caretBlinkController.startBlinking();
+    } else {
+      _caretBlinkController.stopBlinking();
+    }
+  }
+
+  void _caretJumpToOpaque() {
+    _caretBlinkController.jumpToOpaque();
+  }
+
+  void _onShouldShowCollapsedHandleChange() {
+    // The controller went from wanting a collapsed handle to wanting expanded handles,
+    // or vis-a-versa. This signal is relevant to us because of an ambiguous handle situation.
+    // The user might drag an expanded handle such  that the selection is collapsed, in which
+    // case we still want to show an expanded handle. Similarly, if the user then releases that
+    // expanded handle, we should switch to a collapsed handle for the same selection. This
+    // method tells us that the desired handle type has changed. Re-run layout and build to
+    // ensure that we're showing the correct handle.
+    setState(() {
+      //
+    });
+  }
+
+  @override
+  DocumentSelectionLayout? computeLayoutDataWithDocumentLayout(BuildContext context, DocumentLayout documentLayout) {
+    final selection = widget.selection.value;
+    if (selection == null) {
+      return null;
+    }
+
+    if (selection.isCollapsed && !_controlsController!.shouldShowExpandedHandles.value) {
+      return DocumentSelectionLayout(
+        caret: documentLayout.getRectForPosition(selection.extent)!,
+      );
+    } else {
+      return DocumentSelectionLayout(
+        upstream: documentLayout.getRectForPosition(
+          widget.document.selectUpstreamPosition(selection.base, selection.extent),
+        )!,
+        downstream: documentLayout.getRectForPosition(
+          widget.document.selectDownstreamPosition(selection.base, selection.extent),
+        )!,
+        expandedSelectionBounds: documentLayout.getRectForSelection(
+          selection.base,
+          selection.extent,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget doBuild(BuildContext context, DocumentSelectionLayout? layoutData) {
+    return IgnorePointer(
+      child: SizedBox.expand(
+        child: layoutData != null //
+            ? _buildHandles(layoutData)
+            : const SizedBox(),
+      ),
+    );
+  }
+
+  Widget _buildHandles(DocumentSelectionLayout layoutData) {
+    if (widget.selection.value == null) {
+      editorGesturesLog.finer("Not building overlay handles because there's no selection.");
+      return const SizedBox.shrink();
+    }
+
+    return Stack(
+      children: [
+        if (layoutData.caret != null) //
+          _buildCaret(caret: layoutData.caret!),
+        if (layoutData.upstream != null && layoutData.downstream != null)
+          ..._buildExpandedHandleLeaders(
+            upstream: layoutData.upstream!,
+            downstream: layoutData.downstream!,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildCaret({
+    required Rect caret,
+  }) {
+    return Positioned(
+      left: caret.left,
+      top: caret.top,
+      height: caret.height,
+      width: 2,
+      child: Leader(
+        link: _controlsController!.collapsedHandleFocalPoint,
+        child: ListenableBuilder(
+          listenable: _caretBlinkController,
+          builder: (context, child) {
+            return ColoredBox(
+              key: DocumentKeys.caret,
+              color: caretColor.withOpacity(_caretBlinkController.opacity),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildExpandedHandleLeaders({
+    required Rect upstream,
+    required Rect downstream,
+  }) {
+    return [
+      Positioned.fromRect(
+        rect: upstream,
+        child: Leader(link: _controlsController!.upstreamHandleFocalPoint),
+      ),
+      Positioned.fromRect(
+        rect: downstream,
+        child: Leader(link: _controlsController!.downstreamHandleFocalPoint),
+      ),
+    ];
+  }
+}
+
+// TODO: Can we get rid of this controller after migrating to compositional approach
 /// Controls the display of drag handles, a magnifier, and a
 /// floating toolbar, assuming Android-style behavior for the
 /// handles.
@@ -68,8 +468,21 @@ class AndroidDocumentGestureEditingController extends GestureEditingController {
     notifyListeners();
   }
 
+  void allowHandles() => _allowedToShowHandles = true;
+
+  void disallowHandles() => _allowedToShowHandles = false;
+
+  /// Whether or not the overlay is allowed to show handles, regardless of selection.
+  ///
+  /// When this is `false`, the handles should be hidden, even if there's a selection,
+  /// and the handles have valid visual offsets.
+  ///
+  /// When this is `true`, the handles MAY be shown, assuming all other necessary
+  /// conditions are met, e.g., there's a selection.
+  bool _allowedToShowHandles = true;
+
   /// Whether a collapsed handle should be displayed.
-  bool get shouldDisplayCollapsedHandle => _collapsedHandleOffset != null;
+  bool get shouldDisplayCollapsedHandle => _allowedToShowHandles && _collapsedHandleOffset != null;
 
   /// The offset of the collapsed handle focal point, within the coordinate space
   /// of the document layout, or `null` if no collapsed handle should be displayed.
@@ -83,7 +496,8 @@ class AndroidDocumentGestureEditingController extends GestureEditingController {
   }
 
   /// Whether the expanded handles (base + extent) should be displayed.
-  bool get shouldDisplayExpandedHandles => _upstreamHandleOffset != null && _downstreamHandleOffset != null;
+  bool get shouldDisplayExpandedHandles =>
+      _allowedToShowHandles && _upstreamHandleOffset != null && _downstreamHandleOffset != null;
 
   /// The offset of the upstream handle focal point, within the coordinate space
   /// of the document layout, or `null` if no upstream handle should be displayed.

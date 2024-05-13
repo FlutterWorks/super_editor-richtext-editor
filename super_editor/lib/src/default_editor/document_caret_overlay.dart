@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:super_editor/src/core/document_composer.dart';
 import 'package:super_editor/src/core/document_layout.dart';
-import 'package:super_editor/src/infrastructure/content_layers.dart';
+import 'package:super_editor/src/infrastructure/documents/document_layers.dart';
+import 'package:super_editor/src/infrastructure/platforms/mobile_documents.dart';
 import 'package:super_text_layout/super_text_layout.dart';
 
 /// Document overlay that paints a caret with the given [caretStyle].
-class CaretDocumentOverlay extends ContentLayerStatefulWidget {
+class CaretDocumentOverlay extends DocumentLayoutLayerStatefulWidget {
   const CaretDocumentOverlay({
     Key? key,
     required this.composer,
@@ -18,6 +19,7 @@ class CaretDocumentOverlay extends ContentLayerStatefulWidget {
     ),
     this.platformOverride,
     this.displayOnAllPlatforms = false,
+    this.displayCaretWithExpandedSelection = true,
     this.blinkTimingMode = BlinkTimingMode.ticker,
   }) : super(key: key);
 
@@ -39,16 +41,22 @@ class CaretDocumentOverlay extends ContentLayerStatefulWidget {
   /// By default, the caret is only displayed on desktop.
   final bool displayOnAllPlatforms;
 
+  /// Whether to display the caret when the selection is expanded.
+  ///
+  /// Defaults to `true`.
+  final bool displayCaretWithExpandedSelection;
+
   /// The timing mechanism used to blink, e.g., `Ticker` or `Timer`.
   ///
   /// `Timer`s are not expected to work in tests.
   final BlinkTimingMode blinkTimingMode;
 
   @override
-  ContentLayerState<CaretDocumentOverlay, Rect?> createState() => _CaretDocumentOverlayState();
+  DocumentLayoutLayerState<CaretDocumentOverlay, Rect?> createState() => CaretDocumentOverlayState();
 }
 
-class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay, Rect?>
+@visibleForTesting
+class CaretDocumentOverlayState extends DocumentLayoutLayerState<CaretDocumentOverlay, Rect?>
     with SingleTickerProviderStateMixin {
   late final BlinkController _blinkController;
 
@@ -89,6 +97,20 @@ class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay,
     super.dispose();
   }
 
+  @visibleForTesting
+  bool get isCaretVisible => _blinkController.opacity == 1.0 && !_shouldHideCaretForExpandedSelection;
+
+  /// Returns `true` if the selection is currently expanded, and we want to hide the caret when
+  /// the selection is expanded.
+  ///
+  /// Returns `false` if the selection is collapsed or `null`, or if we want to show the caret
+  /// when the selection is expanded.
+  bool get _shouldHideCaretForExpandedSelection =>
+      !widget.displayCaretWithExpandedSelection && widget.composer.selection?.isCollapsed == false;
+
+  @visibleForTesting
+  Duration get caretFlashPeriod => _blinkController.flashPeriod;
+
   void _onSelectionChange() {
     _updateCaretFlash();
 
@@ -101,38 +123,39 @@ class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay,
   }
 
   void _startOrStopBlinking() {
-    if (widget.composer.selection == null && !_blinkController.isBlinking) {
+    // TODO: allow a configurable policy as to whether to show the caret at all when the selection is expanded: https://github.com/superlistapp/super_editor/issues/234
+    final wantsToBlink = widget.composer.selection != null;
+    if (wantsToBlink && _blinkController.isBlinking) {
+      return;
+    }
+    if (!wantsToBlink && !_blinkController.isBlinking) {
       return;
     }
 
-    if (widget.composer.selection != null && _blinkController.isBlinking) {
-      return;
-    }
-
-    widget.composer.selection != null //
+    wantsToBlink //
         ? _blinkController.startBlinking()
         : _blinkController.stopBlinking();
   }
 
   void _updateCaretFlash() {
+    // TODO: allow a configurable policy as to whether to show the caret at all when the selection is expanded: https://github.com/superlistapp/super_editor/issues/234
     final documentSelection = widget.composer.selection;
     if (documentSelection == null) {
       _blinkController.stopBlinking();
       return;
     }
 
-    _blinkController.startBlinking();
     _blinkController.jumpToOpaque();
+    _startOrStopBlinking();
   }
 
   @override
-  Rect? computeLayoutData(RenderObject? contentLayout) {
+  Rect? computeLayoutDataWithDocumentLayout(BuildContext context, DocumentLayout documentLayout) {
     final documentSelection = widget.composer.selection;
     if (documentSelection == null) {
       return null;
     }
 
-    final documentLayout = widget.documentLayoutResolver();
     final selectedComponent = documentLayout.getComponentByNodeId(widget.composer.selection!.extent.nodeId);
     if (selectedComponent == null) {
       // Assume that we're in a momentary transitive state where the document layout
@@ -141,7 +164,23 @@ class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay,
       return null;
     }
 
-    return documentLayout.getRectForPosition(documentSelection.extent)!;
+    Rect caretRect =
+        documentLayout.getEdgeForPosition(documentSelection.extent)!.translate(-widget.caretStyle.width / 2, 0.0);
+
+    final overlayBox = context.findRenderObject() as RenderBox?;
+    if (overlayBox != null && overlayBox.hasSize && caretRect.left + widget.caretStyle.width >= overlayBox.size.width) {
+      // Ajust the caret position to make it entirely visible because it's currently placed
+      // partially or entirely outside of the layers' bounds. This can happen for downstream selections
+      // of block components that take all the available width.
+      caretRect = Rect.fromLTWH(
+        overlayBox.size.width - widget.caretStyle.width,
+        caretRect.top,
+        caretRect.width,
+        caretRect.height,
+      );
+    }
+
+    return caretRect;
   }
 
   @override
@@ -154,11 +193,16 @@ class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay,
       return const SizedBox();
     }
 
+    if (_shouldHideCaretForExpandedSelection) {
+      return const SizedBox();
+    }
+
     // Use a RepaintBoundary so that caret flashing doesn't invalidate our
     // ancestor painting.
     return IgnorePointer(
       child: RepaintBoundary(
         child: Stack(
+          clipBehavior: Clip.none,
           children: [
             if (caret != null)
               Positioned(
@@ -169,7 +213,7 @@ class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay,
                   animation: _blinkController,
                   builder: (context, child) {
                     return Container(
-                      key: primaryCaretKey,
+                      key: DocumentKeys.caret,
                       width: widget.caretStyle.width,
                       decoration: BoxDecoration(
                         color: widget.caretStyle.color.withOpacity(_blinkController.opacity),
@@ -185,5 +229,3 @@ class _CaretDocumentOverlayState extends ContentLayerState<CaretDocumentOverlay,
     );
   }
 }
-
-const primaryCaretKey = ValueKey("caret_primary");

@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:super_editor/super_editor.dart';
 
 MutableDocument paragraphThenHrThenParagraphDoc() => MutableDocument(
@@ -22,18 +23,7 @@ MutableDocument hrThenParagraphDoc() => MutableDocument(
       ],
     );
 
-MutableDocument singleParagraphEmptyDoc() => MutableDocument(
-      nodes: [
-        ParagraphNode(id: "1", text: AttributedText()),
-      ],
-    );
-
-MutableDocument twoParagraphEmptyDoc() => MutableDocument(
-      nodes: [
-        ParagraphNode(id: "1", text: AttributedText()),
-        ParagraphNode(id: "2", text: AttributedText()),
-      ],
-    );
+MutableDocument singleParagraphEmptyDoc() => MutableDocument.empty("1");
 
 MutableDocument singleParagraphDoc() => MutableDocument(
       nodes: [
@@ -42,6 +32,17 @@ MutableDocument singleParagraphDoc() => MutableDocument(
           text: AttributedText(
             // String length is 445
             "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+          ),
+        ),
+      ],
+    );
+
+MutableDocument singleParagraphDocShortText() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: "1",
+          text: AttributedText(
+            "This is the first node in a document.",
           ),
         ),
       ],
@@ -56,14 +57,16 @@ MutableDocument singleParagraphWithLinkDoc() => MutableDocument(
             "This paragraph includes a link that the user can tap",
             AttributedSpans(
               attributions: [
-                SpanMarker(
-                    attribution: LinkAttribution(url: Uri.parse("https://fake.url")),
-                    offset: 26,
-                    markerType: SpanMarkerType.start),
-                SpanMarker(
-                    attribution: LinkAttribution(url: Uri.parse("https://fake.url")),
-                    offset: 30,
-                    markerType: SpanMarkerType.end),
+                const SpanMarker(
+                  attribution: LinkAttribution("https://fake.url"),
+                  offset: 26,
+                  markerType: SpanMarkerType.start,
+                ),
+                const SpanMarker(
+                  attribution: LinkAttribution("https://fake.url"),
+                  offset: 30,
+                  markerType: SpanMarkerType.end,
+                ),
               ],
             ),
           ),
@@ -74,6 +77,167 @@ MutableDocument singleParagraphWithLinkDoc() => MutableDocument(
 MutableDocument singleBlockDoc() => MutableDocument(
       nodes: [
         HorizontalRuleNode(id: "1"),
+      ],
+    );
+
+MutableDocument singleParagraphWithPartialColor() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: '1',
+          text: AttributedText(
+            'abcdefghij',
+            AttributedSpans(
+              attributions: [
+                const SpanMarker(
+                  attribution: ColorAttribution(Colors.orange),
+                  offset: 5,
+                  markerType: SpanMarkerType.start,
+                ),
+                const SpanMarker(
+                  attribution: ColorAttribution(Colors.orange),
+                  offset: 9,
+                  markerType: SpanMarkerType.end,
+                ),
+              ],
+            ),
+          ),
+        )
+      ],
+    );
+
+MutableDocument singleParagraphFullColor() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: '1',
+          text: AttributedText(
+            'abcdefghij',
+            AttributedSpans(
+              attributions: [
+                const SpanMarker(
+                  attribution: ColorAttribution(Colors.orange),
+                  offset: 0,
+                  markerType: SpanMarkerType.start,
+                ),
+                const SpanMarker(
+                  attribution: ColorAttribution(Colors.orange),
+                  offset: 9,
+                  markerType: SpanMarkerType.end,
+                ),
+              ],
+            ),
+          ),
+        )
+      ],
+    );
+
+MutableDocument singleParagraphDocAllBold() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: "1",
+          text: AttributedText(
+            "This is the first node in a document.",
+            AttributedSpans(attributions: [
+              const SpanMarker(
+                attribution: boldAttribution,
+                offset: 0,
+                markerType: SpanMarkerType.start,
+              ),
+              const SpanMarker(
+                attribution: boldAttribution,
+                offset: 36,
+                markerType: SpanMarkerType.end,
+              ),
+            ]),
+          ),
+        ),
+      ],
+    );
+
+MutableDocument twoParagraphEmptyDoc() => MutableDocument(
+      nodes: [
+        ParagraphNode(id: "1", text: AttributedText()),
+        ParagraphNode(id: "2", text: AttributedText()),
+      ],
+    );
+
+MutableDocument twoParagraphDoc() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: "1",
+          text: AttributedText(
+            "This is the first node in a document.",
+          ),
+        ),
+        ParagraphNode(
+          id: "2",
+          text: AttributedText(
+            "This is the second node in a document.",
+          ),
+        ),
+      ],
+    );
+
+MutableDocument twoParagraphDocAllBold() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: "1",
+          text: AttributedText(
+            "This is the first node in a document.",
+            AttributedSpans(attributions: [
+              const SpanMarker(
+                attribution: boldAttribution,
+                offset: 0,
+                markerType: SpanMarkerType.start,
+              ),
+              const SpanMarker(
+                attribution: boldAttribution,
+                offset: 36,
+                markerType: SpanMarkerType.end,
+              ),
+            ]),
+          ),
+        ),
+        ParagraphNode(
+          id: "2",
+          text: AttributedText(
+            "This is the second node in a document.",
+            AttributedSpans(attributions: [
+              const SpanMarker(
+                attribution: boldAttribution,
+                offset: 0,
+                markerType: SpanMarkerType.start,
+              ),
+              const SpanMarker(
+                attribution: boldAttribution,
+                offset: 37,
+                markerType: SpanMarkerType.end,
+              ),
+            ]),
+          ),
+        ),
+      ],
+    );
+
+MutableDocument threeParagraphDoc() => MutableDocument(
+      nodes: [
+        ParagraphNode(
+          id: "1",
+          text: AttributedText(
+            "This is the first node in a document.",
+          ),
+        ),
+        ParagraphNode(
+          id: "2",
+          text: AttributedText(
+            "This is the second node in a document.",
+          ),
+        ),
+        ParagraphNode(
+          id: "3",
+          text: AttributedText(
+            "This is the third node in a document.",
+          ),
+        ),
       ],
     );
 

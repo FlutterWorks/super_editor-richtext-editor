@@ -1,11 +1,13 @@
 import 'dart:math';
 import 'dart:ui';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/widgets.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/documents/document_scroller.dart';
-import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
+import 'package:super_editor/src/infrastructure/flutter/build_context.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
+import 'package:super_editor/src/infrastructure/flutter/material_scrollbar.dart';
 import 'package:super_editor/src/infrastructure/scrolling_diagnostics/_scrolling_minimap.dart';
 
 import '../infrastructure/document_gestures.dart';
@@ -159,7 +161,8 @@ class _DocumentScrollableState extends State<DocumentScrollable> with SingleTick
   /// widget includes a `ScrollView` and this `State`'s render object
   /// is the viewport `RenderBox`.
   RenderBox get _viewport =>
-      (_findAncestorScrollable(context)?.context.findRenderObject() ?? context.findRenderObject()) as RenderBox;
+      (context.findAncestorScrollableWithVerticalScroll?.context.findRenderObject() ?? context.findRenderObject())
+          as RenderBox;
 
   /// Returns the `ScrollPosition` that controls the scroll offset of
   /// this widget.
@@ -173,25 +176,9 @@ class _DocumentScrollableState extends State<DocumentScrollable> with SingleTick
   /// is returned.
   ScrollPosition get _scrollPosition => _ancestorScrollPosition ?? _scrollController.position;
 
-  ScrollableState? _findAncestorScrollable(BuildContext context) {
-    final ancestorScrollable = Scrollable.maybeOf(context);
-    if (ancestorScrollable == null) {
-      return null;
-    }
-
-    final direction = ancestorScrollable.axisDirection;
-    // If the direction is horizontal, then we are inside a widget like a TabBar
-    // or a horizontal ListView, so we can't use the ancestor scrollable
-    if (direction == AxisDirection.left || direction == AxisDirection.right) {
-      return null;
-    }
-
-    return ancestorScrollable;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final ancestorScrollable = _findAncestorScrollable(context);
+    final ancestorScrollable = context.findAncestorScrollableWithVerticalScroll;
     _ancestorScrollPosition = ancestorScrollable?.position;
 
     return Stack(
@@ -210,9 +197,53 @@ class _DocumentScrollableState extends State<DocumentScrollable> with SingleTick
   Widget _buildScroller({
     required Widget child,
   }) {
-    return SingleChildScrollView(
+    final scrollBehavior = ScrollConfiguration.of(context);
+    return _maybeBuildScrollbar(
+      behavior: scrollBehavior,
+      child: ScrollConfiguration(
+        behavior: scrollBehavior.copyWith(scrollbars: false),
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          physics: const NeverScrollableScrollPhysics(),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _maybeBuildScrollbar({
+    required ScrollBehavior behavior,
+    required Widget child,
+  }) {
+    // We allow apps to prevent the custom scrollbar from being added by
+    // wrapping the editor with a `ScrollConfiguration` configured to not
+    // display scrollbars. However, at this moment we can't query this
+    // information from the BuildContext. As a workaround, we check whether
+    // or not the buildScrollbar method returns a ScrollBar. If it doesn't,
+    // this means the app doesn't want us to add our own ScrollBar.
+    //
+    // Change this after https://github.com/flutter/flutter/issues/141508 is solved.
+    final maybeScrollBar = behavior.buildScrollbar(
+      context,
+      child,
+      ScrollableDetails.vertical(controller: _scrollController),
+    );
+    if (maybeScrollBar == child) {
+      // The scroll behavior is configured to NOT show scrollbars.
+      return child;
+    }
+
+    // As we handle the scrolling gestures ourselves,
+    // we use NeverScrollableScrollPhysics to prevent SingleChildScrollView
+    // from scrolling. This also prevents the user from interacting
+    // with the scrollbar.
+    // We use a modified version of Flutter's Scrollbar that allows
+    // configuring it with a different scroll physics.
+    //
+    // See https://github.com/superlistapp/super_editor/issues/1628 for more details.
+    return ScrollbarWithCustomPhysics(
       controller: _scrollController,
-      physics: const NeverScrollableScrollPhysics(),
+      physics: behavior.getScrollPhysics(context),
       child: child,
     );
   }
@@ -373,6 +404,11 @@ class AutoScrollController with ChangeNotifier {
     }
 
     final scrollPosition = _getScrollPosition!();
+
+    if (scrollPosition.maxScrollExtent == 0) {
+      return;
+    }
+
     scrollPosition.jumpTo(
       (scrollPosition.pixels + delta).clamp(0.0, scrollPosition.maxScrollExtent),
     );
@@ -388,7 +424,9 @@ class AutoScrollController with ChangeNotifier {
     }
 
     if (pos is ScrollPositionWithSingleContext) {
-      pos.goBallistic(pixelsPerSecond);
+      if (pos.maxScrollExtent > 0) {
+        pos.goBallistic(pixelsPerSecond);
+      }
       pos.context.setIgnorePointer(false);
     }
   }

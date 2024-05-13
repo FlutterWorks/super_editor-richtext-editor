@@ -18,10 +18,11 @@ import 'package:example/demos/flutter_features/demo_inline_widgets.dart';
 import 'package:example/demos/flutter_features/textinputclient/basic_text_input_client.dart';
 import 'package:example/demos/flutter_features/textinputclient/textfield.dart';
 import 'package:example/demos/in_the_lab/selected_text_colors_demo.dart';
+import 'package:example/demos/interaction_spot_checks/toolbar_following_content_in_layer.dart';
 import 'package:example/demos/scrolling/demo_task_and_chat_with_customscrollview.dart';
 import 'package:example/demos/sliver_example_editor.dart';
 import 'package:example/demos/styles/demo_doc_styles.dart';
-import 'package:example/demos/super_document/demo_super_reader.dart';
+import 'package:example/demos/super_reader/demo_super_reader.dart';
 import 'package:example/demos/supertextfield/demo_textfield.dart';
 import 'package:example/demos/supertextfield/ios/demo_superiostextfield.dart';
 import 'package:example/logging.dart';
@@ -34,7 +35,7 @@ import 'package:super_editor/super_editor.dart';
 import 'demos/demo_attributed_text.dart';
 import 'demos/demo_document_loses_focus.dart';
 import 'demos/demo_switch_document_content.dart';
-import 'demos/super_document/demo_read_only_scrolling_document.dart';
+import 'demos/super_reader/demo_read_only_scrolling_document.dart';
 import 'demos/supertextfield/android/demo_superandroidtextfield.dart';
 
 /// Demo of a basic text editor, as well as various widgets that
@@ -53,7 +54,7 @@ Future<void> main() async {
     // textFieldLog,
     // editorUserTagsLog,
     // contentLayersLog,
-    appLog,
+    // appLog,
   });
 
   runApp(SuperEditorDemoApp());
@@ -356,6 +357,18 @@ final _menu = <_MenuGroup>[
         title: 'In CustomScrollView',
         pageBuilder: (context) {
           return ReadOnlyCustomScrollViewDemo();
+        },
+      ),
+    ],
+  ),
+  _MenuGroup(
+    title: 'Spot Checks',
+    items: [
+      _MenuItem(
+        icon: Icons.layers,
+        title: 'Toolbar Following Content Layer',
+        pageBuilder: (context) {
+          return ToolbarFollowingContentInLayer();
         },
       ),
     ],

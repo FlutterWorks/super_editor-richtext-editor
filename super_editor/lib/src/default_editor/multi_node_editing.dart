@@ -14,6 +14,244 @@ import 'paragraph.dart';
 
 final _log = Logger(scope: 'multi_node_editing.dart');
 
+/// Request to paste the given structured [content] in the document at the
+/// given [pastePosition].
+class PasteStructuredContentEditorRequest implements EditRequest {
+  PasteStructuredContentEditorRequest({
+    required this.content,
+    required this.pastePosition,
+  });
+
+  final List<DocumentNode> content;
+  final DocumentPosition pastePosition;
+}
+
+/// Inserts given structured content, in the form of a `List` of [DocumentNode]s at a
+/// given paste position within the document.
+class PasteStructuredContentEditorCommand implements EditCommand {
+  PasteStructuredContentEditorCommand({
+    required List<DocumentNode> content,
+    required DocumentPosition pastePosition,
+  })  : _content = content,
+        _pastePosition = pastePosition;
+
+  final List<DocumentNode> _content;
+  final DocumentPosition _pastePosition;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    if (_content.isEmpty) {
+      // Nothing to paste. Return.
+      return;
+    }
+
+    final document = context.find<MutableDocument>(Editor.documentKey);
+    final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
+    final currentNodeWithSelection = document.getNodeById(_pastePosition.nodeId);
+    if (currentNodeWithSelection is! TextNode) {
+      throw Exception('Can\'t handle pasting text within node of type: $currentNodeWithSelection');
+    }
+
+    editorOpsLog.info("Pasting clipboard content as Markdown in document.");
+
+    if (_content.length == 1) {
+      _pasteSingleNode(executor, document, _content.first, _pastePosition, currentNodeWithSelection);
+    } else {
+      _pasteMultipleNodes(executor, document, _content, currentNodeWithSelection);
+    }
+
+    editorOpsLog.fine('New selection after paste operation: ${composer.selection}');
+    editorOpsLog.fine('Done with paste command.');
+  }
+
+  void _pasteSingleNode(CommandExecutor executor, MutableDocument document, DocumentNode pastedNode,
+      DocumentPosition pastePosition, TextNode currentNodeWithSelection) {
+    if (_canMergeNodes(currentNodeWithSelection, pastedNode)) {
+      executor.executeCommand(
+        InsertAttributedTextCommand(
+          documentPosition: pastePosition,
+          // Only text nodes are merge-able, therefore we know that the first pasted node
+          // is a TextNode.
+          textToInsert: (pastedNode as TextNode).text,
+        ),
+      );
+
+      return;
+    }
+
+    final (upstreamNodeId, _) = _splitPasteParagraph(
+        executor, currentNodeWithSelection.id, (pastePosition.nodePosition as TextNodePosition).offset);
+
+    // Insert the pasted node after the split upstream node.
+    document.insertNodeAfter(
+      existingNode: document.getNodeById(upstreamNodeId)!,
+      newNode: pastedNode,
+    );
+    executor.logChanges([
+      DocumentEdit(
+        NodeInsertedEvent(pastedNode.id, document.getNodeIndexById(pastedNode.id)),
+      )
+    ]);
+
+    // Place the caret at the end of the pasted content.
+    executor.executeCommand(
+      ChangeSelectionCommand(
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: pastedNode.id,
+            nodePosition: pastedNode.endPosition,
+          ),
+        ),
+        SelectionChangeType.insertContent,
+        SelectionReason.userInteraction,
+      ),
+    );
+  }
+
+  void _pasteMultipleNodes(
+    CommandExecutor executor,
+    MutableDocument document,
+    List<DocumentNode> pastedNodes,
+    TextNode currentNodeWithSelection,
+  ) {
+    final textNode = document.getNode(_pastePosition) as TextNode;
+    final pasteTextOffset = (_pastePosition.nodePosition as TextPosition).offset;
+    final nodesToInsert = List.from(_content);
+
+    // Split the original node in two, around the caret.
+    TextNode? downstreamSplitNode;
+    if (pasteTextOffset < textNode.endPosition.offset) {
+      // The caret sits somewhere in the middle of an existing text node. Split the
+      // node at the caret so we can paste structured content in between.
+      final (_, downstreamSplitNodeId) = _splitPasteParagraph(executor, currentNodeWithSelection.id, pasteTextOffset);
+      downstreamSplitNode = document.getNodeById(downstreamSplitNodeId) as TextNode;
+    }
+
+    // (Possibly) merge or delete the upstream split node.
+    bool deleteInitiallySelectedNode = false;
+    final firstPastedNode = nodesToInsert.first;
+    if (_canMergeNodes(currentNodeWithSelection, firstPastedNode)) {
+      // The text in the first pasted node is stylistically compatible with the
+      // existing text in the node where the paste was triggered. Therefore, instead
+      // inserting the first pasted node, merge its content with the existing node.
+      executor.executeCommand(
+        InsertAttributedTextCommand(
+          documentPosition: _pastePosition,
+          // Only text nodes are merge-able, therefore we know that the first pasted node
+          // is a TextNode.
+          textToInsert: (firstPastedNode as TextNode).text,
+        ),
+      );
+
+      // We've pasted the first new node. Remove it from the nodes to insert.
+      nodesToInsert.removeAt(0);
+    }
+    if (currentNodeWithSelection.text.length == 0) {
+      // The node with the selection is an empty text node. After we use that node's
+      // position to insert other nodes, we want to delete that first node, as if the
+      // pasted content replaced it.
+      deleteInitiallySelectedNode = true;
+    }
+
+    // (Possibly) merge or delete the downstream split node.
+    if (nodesToInsert.isNotEmpty) {
+      final lastPastedNode = nodesToInsert.last;
+      if (downstreamSplitNode != null && _canMergeNodes(lastPastedNode, downstreamSplitNode)) {
+        // The text in the last pasted node is stylistically compatible with the
+        // existing text in the node that was split after the caret. Therefore, instead
+        // of inserting the last pasted node, merge its content with the existing split
+        // node.
+        executor.executeCommand(
+          InsertAttributedTextCommand(
+            documentPosition: DocumentPosition(
+              nodeId: downstreamSplitNode.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+            // Only text nodes are merge-able, therefore we know that the last pasted node
+            // is a TextNode.
+            textToInsert: (lastPastedNode as TextNode).text,
+          ),
+        );
+
+        // We've pasted the last new node. Remove it from the nodes to insert.
+        nodesToInsert.removeLast();
+      }
+    }
+
+    // Now that the first and last pasted nodes have been merged with existing content
+    // (or not), insert all remaining pasted nodes into the document.
+    DocumentNode previousNode = currentNodeWithSelection;
+    for (final pastedNode in nodesToInsert) {
+      document.insertNodeAfter(
+        existingNode: previousNode,
+        newNode: pastedNode,
+      );
+      previousNode = pastedNode;
+
+      executor.logChanges([
+        DocumentEdit(
+          NodeInsertedEvent(pastedNode.id, document.getNodeIndexById(pastedNode.id)),
+        )
+      ]);
+    }
+
+    if (deleteInitiallySelectedNode) {
+      document.deleteNode(currentNodeWithSelection);
+      executor.logChanges([
+        DocumentEdit(
+          NodeRemovedEvent(currentNodeWithSelection.id, currentNodeWithSelection),
+        )
+      ]);
+    }
+
+    // Place the caret at the end of the pasted content.
+    executor.executeCommand(
+      ChangeSelectionCommand(
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: previousNode.id,
+            nodePosition: previousNode.endPosition,
+          ),
+        ),
+        SelectionChangeType.insertContent,
+        SelectionReason.userInteraction,
+      ),
+    );
+  }
+
+  (String upstreamNode, String downstreamNode) _splitPasteParagraph(
+    CommandExecutor executor,
+    String currentNodeWithSelectionId,
+    int pasteTextOffset,
+  ) {
+    final newNodeId = Editor.createNodeId();
+    executor.executeCommand(
+      SplitParagraphCommand(
+        nodeId: currentNodeWithSelectionId,
+        splitPosition: TextPosition(offset: pasteTextOffset),
+        newNodeId: newNodeId,
+        replicateExistingMetadata: true,
+      ),
+    );
+
+    return (currentNodeWithSelectionId, newNodeId);
+  }
+
+  bool _canMergeNodes(DocumentNode existingNode, DocumentNode newNode) {
+    if (existingNode is! TextNode || newNode is! TextNode) {
+      // We can only merge text nodes.
+      return false;
+    }
+
+    if (existingNode.metadata['blockType'] != newNode.metadata['blockType']) {
+      // Text nodes with different block types cannot be merged, e.g., "Header 1" with a "Blockquote".
+      return false;
+    }
+
+    return true;
+  }
+}
+
 class InsertNodeAtIndexRequest implements EditRequest {
   InsertNodeAtIndexRequest({
     required this.nodeIndex,
@@ -407,32 +645,33 @@ class ReplaceNodeWithEmptyParagraphWithCaretCommand implements EditCommand {
   }
 }
 
-class DeleteSelectionRequest implements EditRequest {
-  DeleteSelectionRequest({
-    required this.documentSelection,
+class DeleteContentRequest implements EditRequest {
+  DeleteContentRequest({
+    required this.documentRange,
   });
 
-  final DocumentSelection documentSelection;
+  final DocumentRange documentRange;
 }
 
-class DeleteSelectionCommand implements EditCommand {
-  DeleteSelectionCommand({
-    required this.documentSelection,
+class DeleteContentCommand implements EditCommand {
+  DeleteContentCommand({
+    required this.documentRange,
   });
 
-  final DocumentSelection documentSelection;
+  final DocumentRange documentRange;
 
   @override
   void execute(EditContext context, CommandExecutor executor) {
-    _log.log('DeleteSelectionCommand', 'DocumentEditor: deleting selection: $documentSelection');
+    _log.log('DeleteSelectionCommand', 'DocumentEditor: deleting selection: $documentRange');
     final document = context.find<MutableDocument>(Editor.documentKey);
-    final nodes = document.getNodesInside(documentSelection.base, documentSelection.extent);
+    final nodes = document.getNodesInside(documentRange.start, documentRange.end);
+    final normalizedRange = documentRange.normalize(document);
 
     if (nodes.length == 1) {
       // This is a selection within a single node.
       final changeList = _deleteSelectionWithinSingleNode(
         document: document,
-        documentSelection: documentSelection,
+        normalizedRange: normalizedRange,
         node: nodes.first,
       );
 
@@ -440,25 +679,16 @@ class DeleteSelectionCommand implements EditCommand {
       return;
     }
 
-    final range = document.getRangeBetween(documentSelection.base, documentSelection.extent);
-
-    final startNode = document.getNode(range.start);
-    final baseNode = document.getNode(documentSelection.base);
+    final startNode = document.getNode(normalizedRange.start);
     if (startNode == null) {
-      throw Exception('Could not locate start node for DeleteSelectionCommand: ${range.start}');
+      throw Exception('Could not locate start node for DeleteSelectionCommand: ${normalizedRange.start}');
     }
-    final startNodePosition = startNode.id == documentSelection.base.nodeId
-        ? documentSelection.base.nodePosition
-        : documentSelection.extent.nodePosition;
     final startNodeIndex = document.getNodeIndexById(startNode.id);
 
-    final endNode = document.getNode(range.end);
+    final endNode = document.getNode(normalizedRange.end);
     if (endNode == null) {
-      throw Exception('Could not locate end node for DeleteSelectionCommand: ${range.end}');
+      throw Exception('Could not locate end node for DeleteSelectionCommand: ${normalizedRange.end}');
     }
-    final endNodePosition = startNode.id == documentSelection.base.nodeId
-        ? documentSelection.extent.nodePosition
-        : documentSelection.base.nodePosition;
     final endNodeIndex = document.getNodeIndexById(endNode.id);
 
     executor.logChanges(
@@ -471,20 +701,20 @@ class DeleteSelectionCommand implements EditCommand {
 
     _log.log('DeleteSelectionCommand', ' - deleting partial selection within the starting node.');
     executor.logChanges(
-      _deleteSelectionWithinNodeFromPositionToEnd(
+      _deleteRangeWithinNodeFromPositionToEnd(
         document: document,
         node: startNode,
-        nodePosition: startNodePosition,
+        nodePosition: normalizedRange.start.nodePosition,
         replaceWithParagraph: false,
       ),
     );
 
     _log.log('DeleteSelectionCommand', ' - deleting partial selection within ending node.');
     executor.logChanges(
-      _deleteSelectionWithinNodeFromStartToPosition(
+      _deleteRangeWithinNodeFromStartToPosition(
         document: document,
         node: endNode,
-        nodePosition: endNodePosition,
+        nodePosition: normalizedRange.end.nodePosition,
       ),
     );
 
@@ -496,11 +726,11 @@ class DeleteSelectionCommand implements EditCommand {
       final insertIndex = min(startNodeIndex, endNodeIndex);
       document.insertNodeAt(
         insertIndex,
-        ParagraphNode(id: baseNode!.id, text: AttributedText()),
+        ParagraphNode(id: startNode.id, text: AttributedText()),
       );
       executor.logChanges([
         DocumentEdit(
-          NodeChangeEvent(baseNode.id),
+          NodeChangeEvent(startNode.id),
         )
       ]);
     }
@@ -525,7 +755,7 @@ class DeleteSelectionCommand implements EditCommand {
       DocumentEdit(
         TextInsertionEvent(
           nodeId: startNodeAfterDeletion.id,
-          offset: startNodeAfterDeletion.text.text.length,
+          offset: startNodeAfterDeletion.text.length,
           text: endNodeAfterDeletion.text,
         ),
       ),
@@ -544,20 +774,20 @@ class DeleteSelectionCommand implements EditCommand {
 
   List<EditEvent> _deleteSelectionWithinSingleNode({
     required MutableDocument document,
-    required DocumentSelection documentSelection,
+    required DocumentRange normalizedRange,
     required DocumentNode node,
   }) {
     _log.log('_deleteSelectionWithinSingleNode', ' - deleting selection within single node');
-    final basePosition = documentSelection.base.nodePosition;
-    final extentPosition = documentSelection.extent.nodePosition;
+    final startPosition = normalizedRange.start.nodePosition;
+    final endPosition = normalizedRange.end.nodePosition;
 
-    if (basePosition is UpstreamDownstreamNodePosition) {
-      if (basePosition == extentPosition) {
+    if (startPosition is UpstreamDownstreamNodePosition) {
+      if (startPosition == endPosition) {
         // The selection is collapsed. Nothing to delete.
         return [];
       }
 
-      // The selection is expanded within a block-level node. The only
+      // The range is expanded within a block-level node. The only
       // possibility is that the entire node is selected. Delete the node
       // and replace it with an empty paragraph.
       document.replaceNode(
@@ -572,10 +802,8 @@ class DeleteSelectionCommand implements EditCommand {
       ];
     } else if (node is TextNode) {
       _log.log('_deleteSelectionWithinSingleNode', ' - its a TextNode');
-      final baseOffset = (basePosition as TextPosition).offset;
-      final extentOffset = (extentPosition as TextPosition).offset;
-      final startOffset = baseOffset < extentOffset ? baseOffset : extentOffset;
-      final endOffset = baseOffset < extentOffset ? extentOffset : baseOffset;
+      final startOffset = (startPosition as TextPosition).offset;
+      final endOffset = (endPosition as TextPosition).offset;
       _log.log('_deleteSelectionWithinSingleNode', ' - deleting from $startOffset to $endOffset');
 
       final deletedText = node.text.copyText(startOffset, endOffset);
@@ -625,10 +853,10 @@ class DeleteSelectionCommand implements EditCommand {
     return changes;
   }
 
-  List<EditEvent> _deleteSelectionWithinNodeFromPositionToEnd({
+  List<EditEvent> _deleteRangeWithinNodeFromPositionToEnd({
     required MutableDocument document,
     required DocumentNode node,
-    required dynamic nodePosition,
+    required NodePosition nodePosition,
     required bool replaceWithParagraph,
   }) {
     if (nodePosition is UpstreamDownstreamNodePosition) {
@@ -655,19 +883,21 @@ class DeleteSelectionCommand implements EditCommand {
           )
         ];
       } else {
+        final textNodePosition = nodePosition as TextNodePosition;
+
         // Delete part of the text.
-        final deletedText = node.text.copyText(nodePosition.offset);
+        final deletedText = node.text.copyText(textNodePosition.offset);
 
         node.text = node.text.removeRegion(
-          startOffset: nodePosition.offset,
-          endOffset: node.text.text.length,
+          startOffset: textNodePosition.offset,
+          endOffset: node.text.length,
         );
 
         return [
           DocumentEdit(
             TextDeletedEvent(
               node.id,
-              offset: nodePosition.offset,
+              offset: textNodePosition.offset,
               deletedText: deletedText,
             ),
           )
@@ -678,10 +908,10 @@ class DeleteSelectionCommand implements EditCommand {
     }
   }
 
-  List<EditEvent> _deleteSelectionWithinNodeFromStartToPosition({
+  List<EditEvent> _deleteRangeWithinNodeFromStartToPosition({
     required MutableDocument document,
     required DocumentNode node,
-    required dynamic nodePosition,
+    required NodePosition nodePosition,
   }) {
     if (nodePosition is UpstreamDownstreamNodePosition) {
       if (nodePosition.affinity == TextAffinity.upstream) {
@@ -707,12 +937,14 @@ class DeleteSelectionCommand implements EditCommand {
           )
         ];
       } else {
+        final textNodePosition = nodePosition as TextNodePosition;
+
         // Delete part of the text.
-        final deletedText = node.text.copyText(0, nodePosition.offset);
+        final deletedText = node.text.copyText(0, textNodePosition.offset);
 
         node.text = node.text.removeRegion(
           startOffset: 0,
-          endOffset: nodePosition.offset,
+          endOffset: textNodePosition.offset,
         );
 
         return [

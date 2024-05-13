@@ -1,6 +1,7 @@
 import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:super_editor/src/core/document_composer.dart';
 import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/core/editor.dart';
 import 'package:super_editor/src/default_editor/attributions.dart';
@@ -111,13 +112,18 @@ class ListItemComponentBuilder implements ComponentBuilder {
 
     int? ordinalValue;
     if (node.type == ListItemType.ordered) {
+      // Counts the number of ordered list items above the current node with the same indentation level. Ordered
+      // list items with the same indentation level might be separated by ordered or unordered list items with
+      // different indentation levels.
       ordinalValue = 1;
       DocumentNode? nodeAbove = document.getNodeBefore(node);
-      while (nodeAbove != null &&
-          nodeAbove is ListItemNode &&
-          nodeAbove.type == ListItemType.ordered &&
-          nodeAbove.indent >= node.indent) {
+      while (nodeAbove != null && nodeAbove is ListItemNode && nodeAbove.indent >= node.indent) {
         if (nodeAbove.indent == node.indent) {
+          if (nodeAbove.type != ListItemType.ordered) {
+            // We found an unordered list item with the same indentation level as the ordered list item.
+            // Other ordered list items aboce this one do not belong to the same list.
+            break;
+          }
           ordinalValue = ordinalValue! + 1;
         }
         nodeAbove = document.getNodeBefore(nodeAbove);
@@ -144,17 +150,19 @@ class ListItemComponentBuilder implements ComponentBuilder {
 
     if (componentViewModel.type == ListItemType.unordered) {
       return UnorderedListItemComponent(
-        textKey: componentContext.componentKey,
+        componentKey: componentContext.componentKey,
         text: componentViewModel.text,
         styleBuilder: componentViewModel.textStyleBuilder,
         indent: componentViewModel.indent,
         textSelection: componentViewModel.selection,
         selectionColor: componentViewModel.selectionColor,
         highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
+        composingRegion: componentViewModel.composingRegion,
+        showComposingUnderline: componentViewModel.showComposingUnderline,
       );
     } else if (componentViewModel.type == ListItemType.ordered) {
       return OrderedListItemComponent(
-        textKey: componentContext.componentKey,
+        componentKey: componentContext.componentKey,
         indent: componentViewModel.indent,
         listIndex: componentViewModel.ordinalValue!,
         text: componentViewModel.text,
@@ -162,6 +170,8 @@ class ListItemComponentBuilder implements ComponentBuilder {
         textSelection: componentViewModel.selection,
         selectionColor: componentViewModel.selectionColor,
         highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
+        composingRegion: componentViewModel.composingRegion,
+        showComposingUnderline: componentViewModel.showComposingUnderline,
       );
     }
 
@@ -186,6 +196,8 @@ class ListItemComponentViewModel extends SingleColumnLayoutComponentViewModel wi
     this.selection,
     required this.selectionColor,
     this.highlightWhenEmpty = false,
+    this.composingRegion,
+    this.showComposingUnderline = false,
   }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
 
   ListItemType type;
@@ -206,6 +218,10 @@ class ListItemComponentViewModel extends SingleColumnLayoutComponentViewModel wi
   Color selectionColor;
   @override
   bool highlightWhenEmpty;
+  @override
+  TextRange? composingRegion;
+  @override
+  bool showComposingUnderline;
 
   @override
   ListItemComponentViewModel copy() {
@@ -221,6 +237,8 @@ class ListItemComponentViewModel extends SingleColumnLayoutComponentViewModel wi
       textDirection: textDirection,
       selection: selection,
       selectionColor: selectionColor,
+      composingRegion: composingRegion,
+      showComposingUnderline: showComposingUnderline,
     );
   }
 
@@ -237,7 +255,9 @@ class ListItemComponentViewModel extends SingleColumnLayoutComponentViewModel wi
           text == other.text &&
           textDirection == other.textDirection &&
           selection == other.selection &&
-          selectionColor == other.selectionColor;
+          selectionColor == other.selectionColor &&
+          composingRegion == other.composingRegion &&
+          showComposingUnderline == other.showComposingUnderline;
 
   @override
   int get hashCode =>
@@ -249,16 +269,18 @@ class ListItemComponentViewModel extends SingleColumnLayoutComponentViewModel wi
       text.hashCode ^
       textDirection.hashCode ^
       selection.hashCode ^
-      selectionColor.hashCode;
+      selectionColor.hashCode ^
+      composingRegion.hashCode ^
+      showComposingUnderline.hashCode;
 }
 
 /// Displays a un-ordered list item in a document.
 ///
 /// Supports various indentation levels, e.g., 1, 2, 3, ...
-class UnorderedListItemComponent extends StatelessWidget {
+class UnorderedListItemComponent extends StatefulWidget {
   const UnorderedListItemComponent({
     Key? key,
-    required this.textKey,
+    required this.componentKey,
     required this.text,
     required this.styleBuilder,
     this.dotBuilder = _defaultUnorderedListItemDotBuilder,
@@ -269,10 +291,12 @@ class UnorderedListItemComponent extends StatelessWidget {
     this.showCaret = false,
     this.caretColor = Colors.black,
     this.highlightWhenEmpty = false,
+    this.composingRegion,
+    this.showComposingUnderline = false,
     this.showDebugPaint = false,
   }) : super(key: key);
 
-  final GlobalKey textKey;
+  final GlobalKey componentKey;
   final AttributedText text;
   final AttributionStyleBuilder styleBuilder;
   final UnorderedListItemDotBuilder dotBuilder;
@@ -283,43 +307,71 @@ class UnorderedListItemComponent extends StatelessWidget {
   final bool showCaret;
   final Color caretColor;
   final bool highlightWhenEmpty;
+  final TextRange? composingRegion;
+  final bool showComposingUnderline;
   final bool showDebugPaint;
 
   @override
+  State<UnorderedListItemComponent> createState() => _UnorderedListItemComponentState();
+}
+
+class _UnorderedListItemComponentState extends State<UnorderedListItemComponent> {
+  /// A [GlobalKey] that connects a [ProxyTextDocumentComponent] to its
+  /// descendant [TextComponent].
+  ///
+  /// The [ProxyTextDocumentComponent] doesn't know where the [TextComponent] sits
+  /// in its subtree, but the proxy needs access to the [TextComponent] to provide
+  /// access to text layout details.
+  ///
+  /// This key doesn't need to be public because the given [widget.componentKey]
+  /// provides clients with direct access to text layout queries, as well as
+  /// standard [DocumentComponent] queries.
+  final GlobalKey _innerTextComponentKey = GlobalKey();
+
+  @override
   Widget build(BuildContext context) {
-    final textStyle = styleBuilder({});
-    final indentSpace = indentCalculator(textStyle, indent);
+    // Usually, the font size is obtained via the stylesheet. But the attributions might
+    // also contain a FontSizeAttribution, which overrides the stylesheet. Use the attributions
+    // of the first character to determine the text style.
+    final attributions = widget.text.getAllAttributionsAt(0).toSet();
+    final textStyle = widget.styleBuilder(attributions);
+
+    final indentSpace = widget.indentCalculator(textStyle, widget.indent);
     final textScaler = MediaQuery.textScalerOf(context);
     final lineHeight = textScaler.scale(textStyle.fontSize! * (textStyle.height ?? 1.25));
-    const manualVerticalAdjustment = 3.0;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: indentSpace,
-          margin: const EdgeInsets.only(top: manualVerticalAdjustment),
-          decoration: BoxDecoration(
-            border: showDebugPaint ? Border.all(width: 1, color: Colors.grey) : null,
+    return ProxyTextDocumentComponent(
+      key: widget.componentKey,
+      textComponentKey: _innerTextComponentKey,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: indentSpace,
+            decoration: BoxDecoration(
+              border: widget.showDebugPaint ? Border.all(width: 1, color: Colors.grey) : null,
+            ),
+            child: SizedBox(
+              height: lineHeight,
+              child: widget.dotBuilder(context, widget),
+            ),
           ),
-          child: SizedBox(
-            height: lineHeight,
-            child: dotBuilder(context, this),
+          Expanded(
+            child: TextComponent(
+              key: _innerTextComponentKey,
+              text: widget.text,
+              textStyleBuilder: widget.styleBuilder,
+              textSelection: widget.textSelection,
+              textScaler: textScaler,
+              selectionColor: widget.selectionColor,
+              highlightWhenEmpty: widget.highlightWhenEmpty,
+              composingRegion: widget.composingRegion,
+              showComposingUnderline: widget.showComposingUnderline,
+              showDebugPaint: widget.showDebugPaint,
+            ),
           ),
-        ),
-        Expanded(
-          child: TextComponent(
-            key: textKey,
-            text: text,
-            textStyleBuilder: styleBuilder,
-            textSelection: textSelection,
-            textScaler: textScaler,
-            selectionColor: selectionColor,
-            highlightWhenEmpty: highlightWhenEmpty,
-            showDebugPaint: showDebugPaint,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -327,16 +379,38 @@ class UnorderedListItemComponent extends StatelessWidget {
 typedef UnorderedListItemDotBuilder = Widget Function(BuildContext, UnorderedListItemComponent);
 
 Widget _defaultUnorderedListItemDotBuilder(BuildContext context, UnorderedListItemComponent component) {
+  // Usually, the font size is obtained via the stylesheet. But the attributions might
+  // also contain a FontSizeAttribution, which overrides the stylesheet. Use the attributions
+  // of the first character to determine the text style.
+  final attributions = component.text.getAllAttributionsAt(0).toSet();
+  final textStyle = component.styleBuilder(attributions);
+
   return Align(
     alignment: Alignment.centerRight,
-    child: Container(
-      width: 4,
-      height: 4,
-      margin: const EdgeInsets.only(right: 10),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: component.styleBuilder({}).color,
+    child: Text.rich(
+      TextSpan(
+        // Place a zero-width joiner before the bullet point to make it properly aligned. Without this,
+        // the bullet point is not vertically centered with the text, even when setting the textStyle
+        // on the whole rich text or WidgetSpan.
+        text: '\u200C',
+        style: textStyle,
+        children: [
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: Container(
+              width: 4,
+              height: 4,
+              margin: const EdgeInsets.only(right: 10),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: textStyle.color,
+              ),
+            ),
+          ),
+        ],
       ),
+      // Don't scale the dot.
+      textScaler: const TextScaler.linear(1.0),
     ),
   );
 }
@@ -344,10 +418,10 @@ Widget _defaultUnorderedListItemDotBuilder(BuildContext context, UnorderedListIt
 /// Displays an ordered list item in a document.
 ///
 /// Supports various indentation levels, e.g., 1, 2, 3, ...
-class OrderedListItemComponent extends StatelessWidget {
+class OrderedListItemComponent extends StatefulWidget {
   const OrderedListItemComponent({
     Key? key,
-    required this.textKey,
+    required this.componentKey,
     required this.listIndex,
     required this.text,
     required this.styleBuilder,
@@ -359,10 +433,12 @@ class OrderedListItemComponent extends StatelessWidget {
     this.showCaret = false,
     this.caretColor = Colors.black,
     this.highlightWhenEmpty = false,
+    this.composingRegion,
+    this.showComposingUnderline = false,
     this.showDebugPaint = false,
   }) : super(key: key);
 
-  final GlobalKey textKey;
+  final GlobalKey componentKey;
   final int listIndex;
   final AttributedText text;
   final AttributionStyleBuilder styleBuilder;
@@ -374,42 +450,72 @@ class OrderedListItemComponent extends StatelessWidget {
   final bool showCaret;
   final Color caretColor;
   final bool highlightWhenEmpty;
+  final TextRange? composingRegion;
+  final bool showComposingUnderline;
   final bool showDebugPaint;
 
   @override
+  State<OrderedListItemComponent> createState() => _OrderedListItemComponentState();
+}
+
+class _OrderedListItemComponentState extends State<OrderedListItemComponent> {
+  /// A [GlobalKey] that connects a [ProxyTextDocumentComponent] to its
+  /// descendant [TextComponent].
+  ///
+  /// The [ProxyTextDocumentComponent] doesn't know where the [TextComponent] sits
+  /// in its subtree, but the proxy needs access to the [TextComponent] to provide
+  /// access to text layout details.
+  ///
+  /// This key doesn't need to be public because the given [widget.componentKey]
+  /// provides clients with direct access to text layout queries, as well as
+  /// standard [DocumentComponent] queries.
+  final GlobalKey _innerTextComponentKey = GlobalKey();
+
+  @override
   Widget build(BuildContext context) {
-    final textStyle = styleBuilder({});
-    final indentSpace = indentCalculator(textStyle, indent);
+    // Usually, the font size is obtained via the stylesheet. But the attributions might
+    // also contain a FontSizeAttribution, which overrides the stylesheet. Use the attributions
+    // of the first character to determine the text style.
+    final attributions = widget.text.getAllAttributionsAt(0).toSet();
+    final textStyle = widget.styleBuilder(attributions);
+
+    final indentSpace = widget.indentCalculator(textStyle, widget.indent);
     final textScaler = MediaQuery.textScalerOf(context);
     final lineHeight = textScaler.scale(textStyle.fontSize! * (textStyle.height ?? 1.0));
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: indentSpace,
-          height: lineHeight,
-          decoration: BoxDecoration(
-            border: showDebugPaint ? Border.all(width: 1, color: Colors.grey) : null,
-          ),
-          child: SizedBox(
+    return ProxyTextDocumentComponent(
+      key: widget.componentKey,
+      textComponentKey: _innerTextComponentKey,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: indentSpace,
             height: lineHeight,
-            child: numeralBuilder(context, this),
+            decoration: BoxDecoration(
+              border: widget.showDebugPaint ? Border.all(width: 1, color: Colors.grey) : null,
+            ),
+            child: SizedBox(
+              height: lineHeight,
+              child: widget.numeralBuilder(context, widget),
+            ),
           ),
-        ),
-        Expanded(
-          child: TextComponent(
-            key: textKey,
-            text: text,
-            textStyleBuilder: styleBuilder,
-            textSelection: textSelection,
-            textScaler: textScaler,
-            selectionColor: selectionColor,
-            highlightWhenEmpty: highlightWhenEmpty,
-            showDebugPaint: showDebugPaint,
+          Expanded(
+            child: TextComponent(
+              key: _innerTextComponentKey,
+              text: widget.text,
+              textStyleBuilder: widget.styleBuilder,
+              textSelection: widget.textSelection,
+              textScaler: textScaler,
+              selectionColor: widget.selectionColor,
+              highlightWhenEmpty: widget.highlightWhenEmpty,
+              composingRegion: widget.composingRegion,
+              showComposingUnderline: widget.showComposingUnderline,
+              showDebugPaint: widget.showDebugPaint,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -421,6 +527,12 @@ double _defaultIndentCalculator(TextStyle textStyle, int indent) {
 }
 
 Widget _defaultOrderedListItemNumeralBuilder(BuildContext context, OrderedListItemComponent component) {
+  // Usually, the font size is obtained via the stylesheet. But the attributions might
+  // also contain a FontSizeAttribution, which overrides the stylesheet. Use the attributions
+  // of the first character to determine the text style.
+  final attributions = component.text.getAllAttributionsAt(0).toSet();
+  final textStyle = component.styleBuilder(attributions);
+
   return OverflowBox(
     maxWidth: double.infinity,
     maxHeight: double.infinity,
@@ -431,7 +543,7 @@ Widget _defaultOrderedListItemNumeralBuilder(BuildContext context, OrderedListIt
         child: Text(
           '${component.listIndex}.',
           textAlign: TextAlign.right,
-          style: component.styleBuilder({}).copyWith(),
+          style: textStyle,
         ),
       ),
     ),
@@ -662,11 +774,13 @@ class SplitListItemCommand implements EditCommand {
   @override
   void execute(EditContext context, CommandExecutor executor) {
     final document = context.find<MutableDocument>(Editor.documentKey);
+    final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
+
     final node = document.getNodeById(nodeId);
     final listItemNode = node as ListItemNode;
     final text = listItemNode.text;
     final startText = text.copyText(0, splitPosition.offset);
-    final endText = splitPosition.offset < text.text.length ? text.copyText(splitPosition.offset) : AttributedText();
+    final endText = splitPosition.offset < text.length ? text.copyText(splitPosition.offset) : AttributedText();
     _log.log('SplitListItemCommand', 'Splitting list item:');
     _log.log('SplitListItemCommand', ' - start text: "$startText"');
     _log.log('SplitListItemCommand', ' - end text: "$endText"');
@@ -698,31 +812,43 @@ class SplitListItemCommand implements EditCommand {
       newNode: newNode,
     );
 
+    // Clear the composing region to avoid keeping a region pointing to the
+    // node that was split.
+    composer.setComposingRegion(null);
+
     _log.log('SplitListItemCommand', ' - inserted new node: ${newNode.id} after old one: ${node.id}');
 
     executor.logChanges([
+      SplitListItemIntention.start(),
       DocumentEdit(
         NodeChangeEvent(nodeId),
       ),
       DocumentEdit(
         NodeInsertedEvent(newNodeId, document.getNodeIndexById(newNodeId)),
       ),
+      SplitListItemIntention.end(),
     ]);
   }
 }
 
+class SplitListItemIntention extends Intention {
+  SplitListItemIntention.start() : super.start();
+
+  SplitListItemIntention.end() : super.end();
+}
+
 ExecutionInstruction tabToIndentListItem({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
   if (keyEvent.logicalKey != LogicalKeyboardKey.tab) {
     return ExecutionInstruction.continueExecution;
   }
-  if (keyEvent.isShiftPressed) {
+  if (HardwareKeyboard.instance.isShiftPressed) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -733,16 +859,16 @@ ExecutionInstruction tabToIndentListItem({
 
 ExecutionInstruction shiftTabToUnIndentListItem({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
   if (keyEvent.logicalKey != LogicalKeyboardKey.tab) {
     return ExecutionInstruction.continueExecution;
   }
-  if (!keyEvent.isShiftPressed) {
+  if (!HardwareKeyboard.instance.isShiftPressed) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -753,9 +879,9 @@ ExecutionInstruction shiftTabToUnIndentListItem({
 
 ExecutionInstruction backspaceToUnIndentListItem({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -785,9 +911,9 @@ ExecutionInstruction backspaceToUnIndentListItem({
 
 ExecutionInstruction splitListItemWhenEnterPressed({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 

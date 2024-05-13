@@ -13,8 +13,8 @@ import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
 import 'package:super_editor/src/infrastructure/keyboard.dart';
-import 'package:super_editor/src/infrastructure/raw_key_event_extensions.dart';
-import 'package:super_editor/src/infrastructure/text_input.dart';
+import 'package:super_editor/src/infrastructure/key_event_extensions.dart';
+import 'package:super_editor/src/infrastructure/platforms/platform.dart';
 
 import 'layout_single_column/layout_single_column.dart';
 import 'text_tools.dart';
@@ -105,6 +105,8 @@ class ParagraphComponentBuilder implements ComponentBuilder {
       textSelection: componentViewModel.selection,
       selectionColor: componentViewModel.selectionColor,
       highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
+      composingRegion: componentViewModel.composingRegion,
+      showComposingUnderline: componentViewModel.showComposingUnderline,
     );
   }
 }
@@ -122,6 +124,8 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
     this.selection,
     required this.selectionColor,
     this.highlightWhenEmpty = false,
+    this.composingRegion,
+    this.showComposingUnderline = false,
   }) : super(nodeId: nodeId, maxWidth: maxWidth, padding: padding);
 
   Attribution? blockType;
@@ -140,6 +144,10 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
   Color selectionColor;
   @override
   bool highlightWhenEmpty;
+  @override
+  TextRange? composingRegion;
+  @override
+  bool showComposingUnderline;
 
   @override
   ParagraphComponentViewModel copy() {
@@ -155,6 +163,8 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       selection: selection,
       selectionColor: selectionColor,
       highlightWhenEmpty: highlightWhenEmpty,
+      composingRegion: composingRegion,
+      showComposingUnderline: showComposingUnderline,
     );
   }
 
@@ -171,7 +181,9 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
           textAlignment == other.textAlignment &&
           selection == other.selection &&
           selectionColor == other.selectionColor &&
-          highlightWhenEmpty == other.highlightWhenEmpty;
+          highlightWhenEmpty == other.highlightWhenEmpty &&
+          composingRegion == other.composingRegion &&
+          showComposingUnderline == other.showComposingUnderline;
 
   @override
   int get hashCode =>
@@ -183,7 +195,72 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       textAlignment.hashCode ^
       selection.hashCode ^
       selectionColor.hashCode ^
-      highlightWhenEmpty.hashCode;
+      highlightWhenEmpty.hashCode ^
+      composingRegion.hashCode ^
+      showComposingUnderline.hashCode;
+}
+
+class ChangeParagraphAlignmentRequest implements EditRequest {
+  ChangeParagraphAlignmentRequest({
+    required this.nodeId,
+    required this.alignment,
+  });
+
+  final String nodeId;
+  final TextAlign alignment;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChangeParagraphAlignmentRequest &&
+          runtimeType == other.runtimeType &&
+          nodeId == other.nodeId &&
+          alignment == other.alignment;
+
+  @override
+  int get hashCode => nodeId.hashCode ^ alignment.hashCode;
+}
+
+class ChangeParagraphAlignmentCommand implements EditCommand {
+  const ChangeParagraphAlignmentCommand({
+    required this.nodeId,
+    required this.alignment,
+  });
+
+  final String nodeId;
+  final TextAlign alignment;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    final document = context.find<MutableDocument>(Editor.documentKey);
+
+    final existingNode = document.getNodeById(nodeId)! as ParagraphNode;
+
+    String? alignmentName;
+    switch (alignment) {
+      case TextAlign.left:
+      case TextAlign.start:
+        alignmentName = 'left';
+        break;
+      case TextAlign.center:
+        alignmentName = 'center';
+        break;
+      case TextAlign.right:
+      case TextAlign.end:
+        alignmentName = 'right';
+        break;
+      case TextAlign.justify:
+        alignmentName = 'justify';
+        break;
+    }
+    existingNode.putMetadataValue('textAlign', alignmentName);
+
+    executor.logChanges([
+      DocumentEdit(
+        NodeChangeEvent(nodeId),
+      ),
+    ]);
+  }
 }
 
 class ChangeParagraphBlockTypeRequest implements EditRequest {
@@ -387,7 +464,7 @@ class SplitParagraphCommand implements EditCommand {
     editorDocLog.info(' - start text: "${startText.text}"');
     editorDocLog.info(' - end text: "${endText.text}"');
 
-    if (splitPosition.offset == text.text.length) {
+    if (splitPosition.offset == text.length) {
       // The paragraph was split at the very end, the user is creating a new,
       // empty paragraph. We should only extend desired attributions from the end
       // of one paragraph, to the beginning of a new paragraph.
@@ -405,7 +482,7 @@ class SplitParagraphCommand implements EditCommand {
         // This attribution shouldn't extend from one paragraph to another. Remove it.
         endText.removeAttribution(
           attributionRange.attribution,
-          SpanRange(attributionRange.start, attributionRange.end),
+          attributionRange.range,
         );
       }
     }
@@ -456,10 +533,12 @@ class SplitParagraphCommand implements EditCommand {
       SelectionChangeEvent(
         oldSelection: oldSelection,
         newSelection: newSelection,
-        oldComposingRegion: oldComposingRegion,
-        newComposingRegion: null,
         changeType: SelectionChangeType.insertContent,
         reason: SelectionReason.userInteraction,
+      ),
+      ComposingRegionChangeEvent(
+        oldComposingRegion: oldComposingRegion,
+        newComposingRegion: null,
       ),
     ];
 
@@ -561,7 +640,7 @@ class DeleteUpstreamAtBeginningOfParagraphCommand implements EditCommand {
       return false;
     }
 
-    final aboveParagraphLength = nodeAbove.text.text.length;
+    final aboveParagraphLength = nodeAbove.text.length;
 
     // Send edit command.
     executor
@@ -647,7 +726,7 @@ class SubmitParagraphIntention extends Intention {
 
 ExecutionInstruction anyCharacterToInsertInParagraph({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
   if (editContext.composer.selection == null) {
     return ExecutionInstruction.continueExecution;
@@ -655,7 +734,7 @@ ExecutionInstruction anyCharacterToInsertInParagraph({
 
   // Do nothing if CMD or CTRL are pressed because this signifies an attempted
   // shortcut.
-  if (keyEvent.isControlPressed || keyEvent.isMetaPressed) {
+  if (HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -721,9 +800,9 @@ class DeleteParagraphCommand implements EditCommand {
 /// header 1, header 2, blockquote.
 ExecutionInstruction backspaceToClearParagraphBlockType({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -755,9 +834,9 @@ ExecutionInstruction backspaceToClearParagraphBlockType({
 
 ExecutionInstruction enterToInsertBlockNewline({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -772,7 +851,7 @@ ExecutionInstruction enterToInsertBlockNewline({
 
 ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
   if (keyEvent.logicalKey != LogicalKeyboardKey.backspace) {
     return ExecutionInstruction.continueExecution;
@@ -817,9 +896,9 @@ ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
 
 ExecutionInstruction doNothingWithEnterOnWeb({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -827,7 +906,7 @@ ExecutionInstruction doNothingWithEnterOnWeb({
     return ExecutionInstruction.continueExecution;
   }
 
-  if (isWeb) {
+  if (CurrentPlatform.isWeb) {
     // On web, pressing enter generates both a key event and a `TextInputAction.newline` action.
     // We handle the newline action and ignore the key event.
     // We return blocked so the OS can process it.
@@ -839,9 +918,9 @@ ExecutionInstruction doNothingWithEnterOnWeb({
 
 ExecutionInstruction doNothingWithBackspaceOnWeb({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -849,7 +928,7 @@ ExecutionInstruction doNothingWithBackspaceOnWeb({
     return ExecutionInstruction.continueExecution;
   }
 
-  if (isWeb) {
+  if (CurrentPlatform.isWeb) {
     // On web, pressing backspace generates both a key event and a deletion delta.
     // We handle the deletion delta and ignore the key event.
     // We return blocked so the OS can process it.
@@ -861,9 +940,9 @@ ExecutionInstruction doNothingWithBackspaceOnWeb({
 
 ExecutionInstruction doNothingWithDeleteOnWeb({
   required SuperEditorContext editContext,
-  required RawKeyEvent keyEvent,
+  required KeyEvent keyEvent,
 }) {
-  if (keyEvent is! RawKeyDownEvent) {
+  if (keyEvent is! KeyDownEvent && keyEvent is! KeyRepeatEvent) {
     return ExecutionInstruction.continueExecution;
   }
 
@@ -871,7 +950,7 @@ ExecutionInstruction doNothingWithDeleteOnWeb({
     return ExecutionInstruction.continueExecution;
   }
 
-  if (isWeb) {
+  if (CurrentPlatform.isWeb) {
     // On web, pressing delete generates both a key event and a deletion delta.
     // We handle the deletion delta and ignore the key event.
     // We return blocked so the OS can process it.

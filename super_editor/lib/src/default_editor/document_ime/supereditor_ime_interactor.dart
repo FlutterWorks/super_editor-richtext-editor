@@ -1,16 +1,18 @@
 import 'dart:math';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document_layout.dart';
 import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/default_editor/debug_visualization.dart';
+import 'package:super_editor/src/default_editor/document_gestures_touch_ios.dart';
+import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
-import 'package:super_editor/src/infrastructure/flutter/flutter_pipeline.dart';
+import 'package:super_editor/src/infrastructure/actions.dart';
+import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
 import 'package:super_editor/src/infrastructure/ime_input_owner.dart';
 import 'package:super_editor/src/infrastructure/platforms/ios/ios_document_controls.dart';
-import 'package:super_editor/src/infrastructure/text_input.dart';
+import 'package:super_editor/src/infrastructure/platforms/platform.dart';
 
 import '../document_hardware_keyboard/document_input_keyboard.dart';
 import 'document_delta_editing.dart';
@@ -121,6 +123,9 @@ class SuperEditorImeInteractor extends StatefulWidget {
   /// The floating cursor is an iOS-only feature. Flutter reports floating cursor
   /// messages through the IME API, which is why this controller is offered as
   /// a property on this IME interactor.
+  ///
+  /// If no [floatingCursorController] is provided, this widget attempts to obtain
+  /// one from an ancestor [SuperEditorIosControlsScope]
   final FloatingCursorController? floatingCursorController;
 
   /// Handlers for all Mac OS "selectors" reported by the IME.
@@ -139,9 +144,11 @@ class SuperEditorImeInteractor extends StatefulWidget {
 class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> implements ImeInputOwner {
   late FocusNode _focusNode;
 
+  SuperEditorIosControlsController? _controlsController;
+
   final _imeConnection = ValueNotifier<TextInputConnection?>(null);
   late TextInputConfiguration _textInputConfiguration;
-  late final DocumentImeInputClient _documentImeClient;
+  late DocumentImeInputClient _documentImeClient;
   // The _imeClient is setup in one of two ways at any given time:
   //   _imeClient -> _documentImeClient, or
   //   _imeClient -> widget.imeOverrides -> _documentImeClient
@@ -153,31 +160,14 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
   // implementation of DocumentImeInputClient. If we find a less confusing
   // way to handle that scenario, then get rid of this property.
   final _documentImeConnection = ValueNotifier<TextInputConnection?>(null);
-  late final TextDeltasDocumentEditor _textDeltasDocumentEditor;
+  late TextDeltasDocumentEditor _textDeltasDocumentEditor;
 
   @override
   void initState() {
     super.initState();
     _focusNode = (widget.focusNode ?? FocusNode());
 
-    _textDeltasDocumentEditor = TextDeltasDocumentEditor(
-      editor: widget.editContext.editor,
-      document: widget.editContext.document,
-      documentLayoutResolver: () => widget.editContext.documentLayout,
-      selection: widget.editContext.composer.selectionNotifier,
-      composerPreferences: widget.editContext.composer.preferences,
-      composingRegion: widget.editContext.composer.composingRegion,
-      commonOps: widget.editContext.commonOps,
-      onPerformAction: (action) => _imeClient.performAction(action),
-    );
-    _documentImeClient = DocumentImeInputClient(
-      selection: widget.editContext.composer.selectionNotifier,
-      composingRegion: widget.editContext.composer.composingRegion,
-      textDeltasDocumentEditor: _textDeltasDocumentEditor,
-      imeConnection: _imeConnection,
-      floatingCursorController: widget.floatingCursorController,
-      onPerformSelector: _onPerformSelector,
-    );
+    _setupImeConnection();
 
     _imeClient = DeltaTextInputClientDecorator();
     _configureImeClientDecorators();
@@ -188,8 +178,23 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controlsController = SuperEditorIosControlsScope.maybeRootOf(context);
+    _documentImeClient.floatingCursorController =
+        widget.floatingCursorController ?? _controlsController?.floatingCursorController;
+  }
+
+  @override
   void didUpdateWidget(SuperEditorImeInteractor oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    if (widget.editContext != oldWidget.editContext) {
+      _setupImeConnection();
+      _documentImeClient.floatingCursorController =
+          widget.floatingCursorController ?? _controlsController?.floatingCursorController;
+      _imeConnection.notifyListeners();
+    }
 
     if (widget.imeConfiguration != oldWidget.imeConfiguration) {
       _textInputConfiguration = widget.imeConfiguration.toTextInputConfiguration();
@@ -227,15 +232,45 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
   @visibleForTesting
   bool get isAttachedToIme => _imeConnection.value?.attached ?? false;
 
+  void _setupImeConnection() {
+    _createTextDeltasDocumentEditor();
+    _createDocumentImeClient();
+  }
+
+  void _createTextDeltasDocumentEditor() {
+    _textDeltasDocumentEditor = TextDeltasDocumentEditor(
+      editor: widget.editContext.editor,
+      document: widget.editContext.document,
+      documentLayoutResolver: () => widget.editContext.documentLayout,
+      selection: widget.editContext.composer.selectionNotifier,
+      composerPreferences: widget.editContext.composer.preferences,
+      composingRegion: widget.editContext.composer.composingRegion,
+      commonOps: widget.editContext.commonOps,
+      onPerformAction: (action) => _imeClient.performAction(action),
+    );
+  }
+
+  void _createDocumentImeClient() {
+    _documentImeClient = DocumentImeInputClient(
+      selection: widget.editContext.composer.selectionNotifier,
+      composingRegion: widget.editContext.composer.composingRegion,
+      textDeltasDocumentEditor: _textDeltasDocumentEditor,
+      imeConnection: _imeConnection,
+      onPerformSelector: _onPerformSelector,
+    );
+  }
+
   void _onImeConnectionChange() {
     if (_imeConnection.value == null) {
       _documentImeConnection.value = null;
       widget.imeOverrides?.client = null;
-    } else {
-      _configureImeClientDecorators();
-      _documentImeConnection.value = _documentImeClient;
-      _reportVisualInformationToIme();
+      return;
     }
+
+    _configureImeClientDecorators();
+    _documentImeConnection.value = _documentImeClient;
+
+    _reportVisualInformationToIme();
   }
 
   void _configureImeClientDecorators() {
@@ -247,7 +282,7 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
     _imeClient.client = widget.imeOverrides ?? _documentImeClient;
   }
 
-  /// Report our size, transform to the root node coordinates, and caret rect to the IME.
+  /// Report the global size and transform of the editor and the caret rect to the IME.
   ///
   /// This is needed to display the OS emoji & symbols panel at the editor selected position.
   ///
@@ -257,12 +292,11 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
       return;
     }
 
-    final renderBox = context.findRenderObject() as RenderBox;
-    _imeConnection.value!.setEditableSizeAndTransform(renderBox.size, renderBox.getTransformTo(null));
-
-    final caretRect = _computeCaretRectInViewportSpace();
-    if (caretRect != null) {
-      _imeConnection.value!.setCaretRect(caretRect);
+    final myRenderBox = context.findRenderObject() as RenderBox?;
+    if (myRenderBox != null && myRenderBox.hasSize) {
+      _reportSizeAndTransformToIme();
+      _reportCaretRectToIme();
+      _reportTextStyleToIme();
     }
 
     // There are some operations that might affect our transform, size and the caret rect,
@@ -271,6 +305,103 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
     // Because of this, we update our size, transform and caret rect at every frame.
     // FIXME: This call seems to be scheduling frames. When the caret is in Timer mode, we see this method running continuously even though the only change should be the caret blinking every half a second
     onNextFrame((_) => _reportVisualInformationToIme());
+  }
+
+  /// Report the global size and transform of the editor to the IME.
+  ///
+  /// This is needed to display the OS emoji & symbols panel at the editor selected position.
+  void _reportSizeAndTransformToIme() {
+    late Size size;
+    late Matrix4 transform;
+
+    if (CurrentPlatform.isWeb) {
+      // On web, we can't set the caret rect.
+      // To display the IME panels at the correct position,
+      // instead of reporting the whole editor size and transform,
+      // we report only the information about the selected node.
+      final sizeAndTransform = _computeSizeAndTransformOfSelectNode();
+      if (sizeAndTransform == null) {
+        return;
+      }
+
+      (size, transform) = sizeAndTransform;
+    } else {
+      final renderBox = context.findRenderObject() as RenderBox;
+
+      size = renderBox.size;
+      transform = renderBox.getTransformTo(null);
+    }
+
+    _imeConnection.value!.setEditableSizeAndTransform(size, transform);
+  }
+
+  void _reportCaretRectToIme() {
+    if (CurrentPlatform.isWeb) {
+      // On web, setting the caret rect isn't supported.
+      // To position the IME popovers, we report the size, transform and style
+      // of the selected component and let the browser position the popovers.
+      return;
+    }
+
+    final caretRect = _computeCaretRectInViewportSpace();
+    if (caretRect != null) {
+      _imeConnection.value!.setCaretRect(caretRect);
+    }
+  }
+
+  /// Report our text style to the IME.
+  ///
+  /// This is used on web to set the text style of the hidden native input,
+  /// to try to match the text size on the browser with our text size.
+  ///
+  /// As our content can have multiple styles, the sizes won't be 100% in sync.
+  ///
+  /// TODO: update this after https://github.com/flutter/flutter/issues/134265 is resolved.
+  void _reportTextStyleToIme() {
+    if (!CurrentPlatform.isWeb) {
+      // If we are not on the web, we can position the caret rect without the need
+      // to send the text styles to the IME.
+      return;
+    }
+
+    final selection = widget.editContext.composer.selection;
+    if (selection == null) {
+      return;
+    }
+
+    final nodePosition = selection.extent.nodePosition;
+    if (nodePosition is! TextNodePosition) {
+      // The selected component doesn't contain text.
+      return;
+    }
+
+    final docLayout = widget.editContext.documentLayout;
+
+    DocumentComponent? selectedComponent = docLayout.getComponentByNodeId(selection.extent.nodeId);
+    if (selectedComponent is ProxyDocumentComponent) {
+      // The selected componente is a proxy.
+      // If this component displays text, the text component is bounded to childDocumentComponentKey.
+      selectedComponent = selectedComponent.childDocumentComponentKey.currentState as DocumentComponent?;
+    }
+
+    if (selectedComponent == null) {
+      editorImeLog.warning('A selection exists but no component for node ${selection.extent.nodeId} was found');
+      return;
+    }
+
+    if (selectedComponent is! TextComponentState) {
+      // The selected component isn't a text component. We can't query its style.
+      return;
+    }
+
+    final style = selectedComponent.getTextStyleAt(nodePosition.offset);
+    _imeConnection.value!.setStyle(
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      textDirection: selectedComponent.textDirection ?? TextDirection.ltr,
+      textAlign: selectedComponent.textAlign ?? TextAlign.left,
+    );
   }
 
   /// Compute the caret rect in the editor's content space.
@@ -302,6 +433,35 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
     return caretOffset & rectInDocLayoutSpace.size;
   }
 
+  /// Compute the size and transform of the selected node's visual component
+  /// to the global coordinates.
+  ///
+  /// Returns `null` if the we don't have a selection, or if we can't find
+  /// a component for the selected node.
+  (Size size, Matrix4 transform)? _computeSizeAndTransformOfSelectNode() {
+    final selection = widget.editContext.composer.selection;
+    if (selection == null) {
+      return null;
+    }
+
+    final documentLayout = widget.editContext.documentLayout;
+
+    DocumentComponent? selectedComponent = documentLayout.getComponentByNodeId(selection.extent.nodeId);
+    if (selectedComponent is ProxyDocumentComponent) {
+      // The selected componente is a proxy.
+      // If this component displays text, the text component is bounded to childDocumentComponentKey.
+      selectedComponent = selectedComponent.childDocumentComponentKey.currentState as DocumentComponent;
+    }
+
+    if (selectedComponent == null) {
+      editorImeLog.warning('A selection exists but no component for node ${selection.extent.nodeId} was found');
+      return null;
+    }
+
+    final renderBox = selectedComponent.context.findRenderObject() as RenderBox;
+    return (renderBox.size, renderBox.getTransformTo(null));
+  }
+
   void _onPerformSelector(String selectorName) {
     final handler = widget.selectorHandlers[selectorName];
     if (handler == null) {
@@ -316,13 +476,8 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
   Widget build(BuildContext context) {
     return SuperEditorImeDebugVisuals(
       imeConnection: _imeConnection,
-      child: Actions(
-        actions: defaultTargetPlatform == TargetPlatform.macOS
-            ? {
-                // Prevents the framework from using the arrow keys to move focus.
-                DoNothingAndStopPropagationTextIntent: DoNothingAction(consumesKey: false),
-              }
-            : {},
+      child: IntentBlocker(
+        intents: CurrentPlatform.isApple ? appleBlockedIntents : nonAppleBlockedIntents,
         child: SuperEditorHardwareKeyHandler(
           focusNode: _focusNode,
           editContext: widget.editContext,
@@ -489,7 +644,7 @@ void unIndentListItem(SuperEditorContext context) {
 }
 
 void insertNewLine(SuperEditorContext context) {
-  if (isWeb) {
+  if (CurrentPlatform.isWeb) {
     return;
   }
   context.commonOps.insertBlockLevelNewline();
@@ -548,14 +703,14 @@ void deleteToEndOfLine(SuperEditorContext context) {
 }
 
 void deleteBackward(SuperEditorContext context) {
-  if (isWeb) {
+  if (CurrentPlatform.isWeb) {
     return;
   }
   context.commonOps.deleteUpstream();
 }
 
 void deleteForward(SuperEditorContext context) {
-  if (isWeb) {
+  if (CurrentPlatform.isWeb) {
     return;
   }
   context.commonOps.deleteDownstream();

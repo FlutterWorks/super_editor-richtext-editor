@@ -353,12 +353,15 @@ class SuperEditorAndroidToolbarFocalPointDocumentLayerBuilder implements SuperEd
 class SuperEditorAndroidHandlesDocumentLayerBuilder implements SuperEditorLayerBuilder {
   const SuperEditorAndroidHandlesDocumentLayerBuilder({
     this.caretColor,
+    this.caretWidth = 2,
   });
 
   /// The (optional) color of the caret (not the drag handle), by default the color
   /// defers to the root [SuperEditorAndroidControlsScope], or the app theme if the
   /// controls controller has no preference for the color.
   final Color? caretColor;
+
+  final double caretWidth;
 
   @override
   ContentLayerWidget build(BuildContext context, SuperEditorContext editContext) {
@@ -379,6 +382,7 @@ class SuperEditorAndroidHandlesDocumentLayerBuilder implements SuperEditorLayerB
           const ClearComposingRegionRequest(),
         ]);
       },
+      caretWidth: caretWidth,
       caretColor: caretColor,
     );
   }
@@ -394,6 +398,7 @@ class AndroidDocumentTouchInteractor extends StatefulWidget {
     required this.document,
     required this.getDocumentLayout,
     required this.selection,
+    required this.openSoftwareKeyboard,
     required this.scrollController,
     this.contentTapHandler,
     this.dragAutoScrollBoundary = const AxisOffset.symmetric(54),
@@ -408,6 +413,9 @@ class AndroidDocumentTouchInteractor extends StatefulWidget {
   final Document document;
   final DocumentLayout Function() getDocumentLayout;
   final ValueListenable<DocumentSelection?> selection;
+
+  /// A callback that should open the software keyboard when invoked.
+  final VoidCallback openSoftwareKeyboard;
 
   /// Optional handler that responds to taps on content, e.g., opening
   /// a link when the user taps on text with a link attribution.
@@ -793,6 +801,14 @@ class _AndroidDocumentTouchInteractorState extends State<AndroidDocumentTouchInt
 
     _showAndHideEditingControlsAfterTapSelection(didTapOnExistingSelection: didTapOnExistingSelection);
 
+    if (didTapOnExistingSelection) {
+      // The user tapped on the existing selection. Show the software keyboard.
+      //
+      // If the user didn't tap on an existing selection, the software keyboard will
+      // already be visible.
+      widget.openSoftwareKeyboard();
+    }
+
     widget.focusNode.requestFocus();
   }
 
@@ -978,8 +994,9 @@ class _AndroidDocumentTouchInteractorState extends State<AndroidDocumentTouchInt
     if (widget.selection.value?.isCollapsed == true) {
       final caretPosition = widget.selection.value!.extent;
       final tapDocumentOffset = widget.getDocumentLayout().getDocumentOffsetFromAncestorOffset(_globalTapDownOffset!);
-      final tapPosition = widget.getDocumentLayout().getDocumentPositionAtOffset(tapDocumentOffset)!;
-      final isTapOverCaret = caretPosition.isEquivalentTo(tapPosition);
+
+      final tapPosition = widget.getDocumentLayout().getDocumentPositionAtOffset(tapDocumentOffset);
+      final isTapOverCaret = tapPosition != null && caretPosition.isEquivalentTo(tapPosition);
 
       if (isTapOverCaret) {
         _onCaretDragPanStart(details);
@@ -1323,6 +1340,7 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
   void initState() {
     super.initState();
     _overlayController.show();
+    widget.selection.addListener(_onSelectionChange);
   }
 
   @override
@@ -1332,6 +1350,7 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
     _controlsController = SuperEditorAndroidControlsScope.rootOf(context);
     // TODO: Replace Cupertino aligner with a generic aligner because this code runs on Android.
     _toolbarAligner = CupertinoPopoverToolbarAligner();
+    widget.selection.addListener(_onSelectionChange);
   }
 
   @override
@@ -1345,6 +1364,11 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
         widget.scrollChangeSignal.addListener(_onDocumentScroll);
       }
     }
+
+    if (widget.selection != oldWidget.selection) {
+      oldWidget.selection.removeListener(_onSelectionChange);
+      widget.selection.addListener(_onSelectionChange);
+    }
   }
 
   @override
@@ -1353,6 +1377,7 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
     // stop listening for document scroll changes.
     widget.dragHandleAutoScroller.value?.stopAutoScrollHandleMonitoring();
     widget.scrollChangeSignal.removeListener(_onDocumentScroll);
+    widget.selection.removeListener(_onSelectionChange);
 
     super.dispose();
   }
@@ -1362,6 +1387,51 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
 
   @visibleForTesting
   bool get wantsToDisplayMagnifier => _controlsController!.shouldShowMagnifier.value;
+
+  /// Returns the `RenderBox` for the scrolling viewport.
+  ///
+  /// If this widget has an ancestor `Scrollable`, then the returned
+  /// `RenderBox` belongs to that ancestor `Scrollable`.
+  ///
+  /// If this widget doesn't have an ancestor `Scrollable`, then this
+  /// widget includes a `ScrollView` and this `State`'s render object
+  /// is the viewport `RenderBox`.
+  RenderBox get viewportBox =>
+      (context.findAncestorScrollableWithVerticalScroll?.context.findRenderObject() ?? context.findRenderObject())
+          as RenderBox;
+
+  void _onSelectionChange() {
+    final selection = widget.selection.value;
+    if (selection == null) {
+      return;
+    }
+
+    if (selection.isCollapsed &&
+        _controlsController!.shouldShowExpandedHandles.value == true &&
+        _dragHandleType == null) {
+      // The selection is collapsed, but the expanded handles are visible and the user isn't dragging a handle.
+      // This can happen when the selection is expanded, and the user deletes the selected text. The only situation
+      // where the expanded handles should be visible when the selection is collapsed is when the selection
+      // collapses while the user is dragging an expanded handle, which isn't the case here. Hide the handles.
+      _controlsController!
+        ..hideCollapsedHandle()
+        ..hideExpandedHandles()
+        ..hideMagnifier()
+        ..hideToolbar()
+        ..blinkCaret();
+    }
+
+    if (!selection.isCollapsed && _controlsController!.shouldShowCollapsedHandle.value == true) {
+      // The selection is expanded, but the collapsed handle is visible. This can happen when the
+      // selection is collapsed and the user taps the "Select All" button. There isn't any situation
+      // where the collapsed handle should be visible when the selection is expanded. Hide the collapsed
+      // handle and show the expanded handles.
+      _controlsController!
+        ..hideCollapsedHandle()
+        ..showExpandedHandles()
+        ..hideMagnifier();
+    }
+  }
 
   void _toggleToolbarOnCollapsedHandleTap() {
     _controlsController!.toggleToolbar();
@@ -1489,11 +1559,12 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
       documentLayout.getDocumentOffsetFromAncestorOffset(_dragHandleSelectionGlobalFocalPoint.value!),
     )!;
 
+    final centerOfContentInContentSpace = documentLayout.getRectForPosition(nearestPosition)!.center;
+
     // Move the magnifier focal point to match the drag x-offset, but always remain focused on the vertical
     // center of the line.
-    final centerOfContentAtNearestPosition = documentLayout.getAncestorOffsetFromDocumentOffset(
-      documentLayout.getRectForPosition(nearestPosition)!.center,
-    );
+    final centerOfContentAtNearestPosition =
+        documentLayout.getAncestorOffsetFromDocumentOffset(centerOfContentInContentSpace);
     _magnifierFocalPoint.value = Offset(
       _magnifierFocalPoint.value!.dx + dragDx,
       centerOfContentAtNearestPosition.dy,
@@ -1523,8 +1594,15 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
     // Update the auto-scroll focal point so that the viewport scrolls if we're
     // close to the boundary.
     widget.dragHandleAutoScroller.value?.updateAutoScrollHandleMonitoring(
-      dragEndInViewport: centerOfContentAtNearestPosition,
+      dragEndInViewport: _contentOffsetInViewport(centerOfContentInContentSpace),
     );
+  }
+
+  /// Converts the [offset] in content space to an offset in the viewport space.
+  Offset _contentOffsetInViewport(Offset offset) {
+    final documentLayout = widget.getDocumentLayout();
+    final globalOffset = documentLayout.getGlobalOffsetFromDocumentOffset(offset);
+    return viewportBox.globalToLocal(globalOffset);
   }
 
   @override
@@ -1718,23 +1796,28 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
     return ValueListenableBuilder(
       valueListenable: _controlsController!.shouldShowMagnifier,
       builder: (context, shouldShow, child) {
-        return shouldShow ? child! : const SizedBox();
+        return _controlsController!.magnifierBuilder != null //
+            ? _controlsController!.magnifierBuilder!(
+                context,
+                DocumentKeys.magnifier,
+                _controlsController!.magnifierFocalPoint,
+                shouldShow,
+              )
+            : _buildDefaultMagnifier(
+                context,
+                DocumentKeys.magnifier,
+                _controlsController!.magnifierFocalPoint,
+                shouldShow,
+              );
       },
-      child: _controlsController!.magnifierBuilder != null //
-          ? _controlsController!.magnifierBuilder!(
-              context,
-              DocumentKeys.magnifier,
-              _controlsController!.magnifierFocalPoint,
-            )
-          : _buildDefaultMagnifier(
-              context,
-              DocumentKeys.magnifier,
-              _controlsController!.magnifierFocalPoint,
-            ),
     );
   }
 
-  Widget _buildDefaultMagnifier(BuildContext context, Key magnifierKey, LeaderLink focalPoint) {
+  Widget _buildDefaultMagnifier(BuildContext context, Key magnifierKey, LeaderLink focalPoint, bool isVisible) {
+    if (!isVisible) {
+      return const SizedBox();
+    }
+
     return Follower.withOffset(
       link: _controlsController!.magnifierFocalPoint,
       offset: const Offset(0, -150),
@@ -1750,11 +1833,7 @@ class SuperEditorAndroidControlsOverlayManagerState extends State<SuperEditorAnd
         child: AndroidMagnifyingGlass(
           key: magnifierKey,
           magnificationScale: 1.5,
-          // In theory, the offsetFromFocalPoint should either be `-150` to match the actual
-          // offset, or it should be `-150 / magnificationLevel`. Neither of those align the
-          // focal point correctly. The following offset was found empirically to give the
-          // desired results, no matter how high the magnification.
-          offsetFromFocalPoint: const Offset(0, -58),
+          offsetFromFocalPoint: Offset(0, -150 / MediaQuery.devicePixelRatioOf(context)),
         ),
       ),
     );

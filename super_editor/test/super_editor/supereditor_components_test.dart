@@ -164,7 +164,7 @@ Future<void> _pumpImageTestApp(
                 width: double.infinity,
               ).toMetadata(),
             ),
-            ...longTextDoc().nodes,
+            ...longTextDoc(),
           ],
         ),
       )
@@ -194,7 +194,7 @@ class _FakeImageComponentBuilder implements ComponentBuilder {
     return ImageComponent(
       componentKey: componentContext.componentKey,
       imageUrl: componentViewModel.imageUrl,
-      selection: componentViewModel.selection,
+      selection: componentViewModel.selection?.nodeSelection as UpstreamDownstreamNodeSelection?,
       selectionColor: componentViewModel.selectionColor,
       imageBuilder: (context, imageUrl) => const SizedBox(height: 100, width: 100),
     );
@@ -209,8 +209,13 @@ class _UnkownNode extends BlockNode with ChangeNotifier {
   _UnkownNode({required this.id});
 
   @override
+  final String id;
+
+  @override
   String? copyContent(NodeSelection selection) => '';
 
   @override
-  final String id;
+  _UnkownNode copy() {
+    return _UnkownNode(id: id);
+  }
 }

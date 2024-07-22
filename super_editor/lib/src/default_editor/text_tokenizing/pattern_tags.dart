@@ -69,9 +69,9 @@ class PatternTagPlugin extends SuperEditorPlugin {
   }
 
   void _initializePatternTagIndex(Editor editor) {
-    final document = editor.context.find<MutableDocument>(Editor.documentKey);
+    final document = editor.context.document;
 
-    for (final node in document.nodes) {
+    for (final node in document) {
       if (node is! TextNode) {
         continue;
       }
@@ -173,6 +173,11 @@ class PatternTagIndex with ChangeNotifier implements Editable {
       notifyListeners();
     }
   }
+
+  @override
+  void reset() {
+    _tags.clear();
+  }
 }
 
 /// An [EditReaction] that creates, updates, and removes pattern tags.
@@ -194,7 +199,7 @@ class PatternTagIndex with ChangeNotifier implements Editable {
 ///     #.
 ///     ##
 ///
-class PatternTagReaction implements EditReaction {
+class PatternTagReaction extends EditReaction {
   PatternTagReaction({
     TagRule tagRule = hashTagRule,
   }) : _tagRule = tagRule;
@@ -239,7 +244,7 @@ class PatternTagReaction implements EditReaction {
     RequestDispatcher requestDispatcher,
     List<EditEvent> changeList,
   ) {
-    final document = editContext.find<MutableDocument>(Editor.documentKey);
+    final document = editContext.document;
 
     final tag = _findTagAtCaret(editContext, (attributions) => attributions.contains(const PatternTagAttribution()));
     if (tag == null) {
@@ -282,7 +287,7 @@ class PatternTagReaction implements EditReaction {
       return null;
     }
 
-    final document = editContext.find<MutableDocument>(Editor.documentKey);
+    final document = editContext.document;
     final selectedNode = document.getNodeById(selectionPosition.nodeId);
     if (selectedNode is! TextNode) {
       // Tagging only happens in the middle of text. The selected content isn't text. Return.
@@ -320,7 +325,7 @@ class PatternTagReaction implements EditReaction {
       return;
     }
 
-    final document = editContext.find<MutableDocument>(Editor.documentKey);
+    final document = editContext.document;
     final selectedNode = document.getNodeById(selectionPosition.nodeId);
     if (selectedNode is! TextNode) {
       // Tagging only happens in the middle of text. The selected content isn't text. Return.
@@ -393,7 +398,7 @@ class PatternTagReaction implements EditReaction {
   ///     [#flutter][#dart]
   ///
   void _splitBackToBackTags(EditContext editContext, RequestDispatcher requestDispatcher, List<EditEvent> changeList) {
-    final document = editContext.find<MutableDocument>(Editor.documentKey);
+    final document = editContext.document;
 
     final textEdits = changeList
         .whereType<DocumentEdit>()
@@ -465,6 +470,11 @@ class PatternTagReaction implements EditReaction {
       }
     }
 
+    if (spanRemovals.isEmpty) {
+      // We didn't find any tags to break up. No need to submit change requests.
+      return;
+    }
+
     // Execute the attribution removals and additions.
     requestDispatcher.execute([
       // Remove the original multi-tag attribution spans.
@@ -523,7 +533,7 @@ class PatternTagReaction implements EditReaction {
 
     // Inspect every TextNode where a text deletion impacted a tag. If a tag no longer contains
     // a trigger, or only contains a trigger, remove the attribution.
-    final document = editContext.find<MutableDocument>(Editor.documentKey);
+    final document = editContext.document;
     final removeTagRequests = <EditRequest>{};
     for (final nodeId in nodesToInspect) {
       final textNode = document.getNodeById(nodeId) as TextNode;
@@ -556,7 +566,7 @@ class PatternTagReaction implements EditReaction {
   }
 
   void _updateTagIndex(EditContext editContext, List<EditEvent> changeList) {
-    final document = editContext.find<MutableDocument>(Editor.documentKey);
+    final document = editContext.document;
     final index = editContext.patternTagIndex;
     for (final event in changeList) {
       if (event is! DocumentEdit) {

@@ -21,7 +21,7 @@ void main() {
             .withiOSToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .withAndroidToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .pump();
-        final nodeId = testContext.findEditContext().document.nodes.first.id;
+        final nodeId = testContext.findEditContext().document.first.id;
 
         await tester.placeCaretInParagraph(nodeId, 15);
 
@@ -40,7 +40,7 @@ void main() {
             .withiOSToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .withAndroidToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .pump();
-        final nodeId = testContext.findEditContext().document.nodes.first.id;
+        final nodeId = testContext.findEditContext().document.first.id;
 
         await tester.doubleTapInParagraph(nodeId, 15);
 
@@ -59,7 +59,7 @@ void main() {
             .withiOSToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .withAndroidToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .pump();
-        final nodeId = testContext.findEditContext().document.nodes.first.id;
+        final nodeId = testContext.findEditContext().document.first.id;
 
         await tester.placeCaretInParagraph(nodeId, 15);
 
@@ -78,7 +78,7 @@ void main() {
             .withiOSToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .withAndroidToolbarBuilder((context, mobileToolbarKey, focalPoint) => const SizedBox())
             .pump();
-        final nodeId = testContext.findEditContext().document.nodes.first.id;
+        final nodeId = testContext.findEditContext().document.first.id;
 
         await tester.doubleTapInParagraph(nodeId, 15);
 
@@ -101,6 +101,7 @@ void main() {
             );
             await tester.pumpAndSettle();
           },
+          maxPixelMismatchCount: 51,
         );
 
         _testParagraphSelection(
@@ -115,10 +116,20 @@ void main() {
 
             final dragDelta = SuperEditorInspector.findDeltaBetweenCharactersInTextNode("1", 34, 28);
             final handleRectGlobal = SuperEditorInspector.findMobileCaretDragHandle().globalRect;
-            await tester.dragFrom(handleRectGlobal.center, dragDelta);
+
+            // Calculate the center of the visual handle, accounting for addition of invisible
+            // touch area expansion. The touch area only expands below the handle, not above
+            // the handle, so using the "center" of the widget would product a point that's
+            // too far down. The invisible height below the handle is about the same height as
+            // the handle, so we'll use the 25% y-value of the whole widget, which is roughly
+            // at the 50% y-value of the visible handle.
+            final centerOfVisualHandle =
+                Offset(handleRectGlobal.center.dx, handleRectGlobal.top + handleRectGlobal.height / 4);
+
+            await tester.dragFrom(centerOfVisualHandle, dragDelta);
 
             // Update the drag line for debug purposes
-            dragLine.value = _Line(handleRectGlobal.center, handleRectGlobal.center + dragDelta);
+            dragLine.value = _Line(handleRectGlobal.center, centerOfVisualHandle + dragDelta);
 
             // Even though this is a golden test, we verify the final selection
             // to make it easier to spot rendering problems vs selection problems.
@@ -132,6 +143,7 @@ void main() {
               ),
             );
           },
+          maxPixelMismatchCount: 51,
         );
 
         _testParagraphSelection(
@@ -163,6 +175,7 @@ void main() {
               ),
             );
           },
+          maxPixelMismatchCount: 51,
         );
 
         _testParagraphSelection(

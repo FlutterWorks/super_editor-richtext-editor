@@ -238,7 +238,7 @@ class BlockquoteComponent extends StatelessWidget {
   }
 }
 
-class ConvertBlockquoteToParagraphCommand implements EditCommand {
+class ConvertBlockquoteToParagraphCommand extends EditCommand {
   ConvertBlockquoteToParagraphCommand({
     required this.nodeId,
   });
@@ -246,8 +246,11 @@ class ConvertBlockquoteToParagraphCommand implements EditCommand {
   final String nodeId;
 
   @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
   void execute(EditContext context, CommandExecutor executor) {
-    final document = context.find<MutableDocument>(Editor.documentKey);
+    final document = context.document;
     final node = document.getNodeById(nodeId);
     final blockquote = node as ParagraphNode;
     final newParagraphNode = ParagraphNode(
@@ -324,7 +327,7 @@ ExecutionInstruction splitBlockquoteWhenEnterPressed({
   return didSplit ? ExecutionInstruction.haltExecution : ExecutionInstruction.continueExecution;
 }
 
-class SplitBlockquoteCommand implements EditCommand {
+class SplitBlockquoteCommand extends EditCommand {
   SplitBlockquoteCommand({
     required this.nodeId,
     required this.splitPosition,
@@ -336,8 +339,11 @@ class SplitBlockquoteCommand implements EditCommand {
   final String newNodeId;
 
   @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
   void execute(EditContext context, CommandExecutor executor) {
-    final document = context.find<MutableDocument>(Editor.documentKey);
+    final document = context.document;
     final node = document.getNodeById(nodeId);
     final blockquote = node as ParagraphNode;
     final text = blockquote.text;

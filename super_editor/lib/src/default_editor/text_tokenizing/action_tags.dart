@@ -112,10 +112,13 @@ class SubmitComposingActionTagRequest implements EditRequest {
   const SubmitComposingActionTagRequest();
 }
 
-class SubmitComposingActionTagCommand implements EditCommand {
+class SubmitComposingActionTagCommand extends EditCommand {
+  @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
   @override
   void execute(EditContext context, CommandExecutor executor) {
-    final document = context.find<MutableDocument>(Editor.documentKey);
+    final document = context.document;
     final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
     if (composer.selection == null) {
       return;
@@ -183,14 +186,17 @@ class CancelComposingActionTagRequest implements EditRequest {
   int get hashCode => tagRule.hashCode;
 }
 
-class CancelComposingActionTagCommand implements EditCommand {
+class CancelComposingActionTagCommand extends EditCommand {
   const CancelComposingActionTagCommand(this._tagRule);
 
   final TagRule _tagRule;
 
   @override
+  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
+
+  @override
   void execute(EditContext context, CommandExecutor executor) {
-    final document = context.find<MutableDocument>(Editor.documentKey);
+    final document = context.document;
     final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
 
     final selection = composer.selection;
@@ -258,7 +264,7 @@ class CancelComposingActionTagCommand implements EditCommand {
   }
 }
 
-class ActionTagComposingReaction implements EditReaction {
+class ActionTagComposingReaction extends EditReaction {
   ActionTagComposingReaction({
     required TagRule tagRule,
     required OnUpdateComposingActionTag onUpdateComposingActionTag,
@@ -272,7 +278,7 @@ class ActionTagComposingReaction implements EditReaction {
 
   @override
   void react(EditContext editorContext, RequestDispatcher requestDispatcher, List<EditEvent> changeList) {
-    final document = editorContext.find<MutableDocument>(Editor.documentKey);
+    final document = editorContext.document;
     final composer = editorContext.find<MutableDocumentComposer>(Editor.composerKey);
 
     _composingTag = editorContext.composingActionTag.value;

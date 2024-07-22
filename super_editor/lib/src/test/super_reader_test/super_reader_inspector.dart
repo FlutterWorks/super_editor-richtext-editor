@@ -107,7 +107,7 @@ class SuperReaderInspector {
   static TextSpan findRichTextInParagraph(String nodeId, [Finder? superReaderFinder]) {
     final documentLayout = _findDocumentLayout(superReaderFinder);
 
-    final textComponentState = documentLayout.getComponentByNodeId(nodeId) as TextComponentState;
+    final textComponentState = documentLayout.getComponentByNodeId(nodeId)!;
     final superText = find
         .descendant(of: find.byWidget(textComponentState.widget), matching: find.byType(SuperText))
         .evaluate()
@@ -123,7 +123,7 @@ class SuperReaderInspector {
   static TextStyle? findParagraphStyle(String nodeId, [Finder? superDocumentFinder]) {
     final documentLayout = _findDocumentLayout(superDocumentFinder);
 
-    final textComponentState = documentLayout.getComponentByNodeId(nodeId) as TextComponentState;
+    final textComponentState = documentLayout.getComponentByNodeId(nodeId)!;
     final superText = find
         .descendant(of: find.byWidget(textComponentState.widget), matching: find.byType(SuperText))
         .evaluate()
@@ -145,11 +145,11 @@ class SuperReaderInspector {
       throw Exception('SuperReader not found');
     }
 
-    if (index >= doc.nodes.length) {
-      throw Exception('Tried to access index $index in a document where the max index is ${doc.nodes.length - 1}');
+    if (index >= doc.nodeCount) {
+      throw Exception('Tried to access index $index in a document where the max index is ${doc.nodeCount - 1}');
     }
 
-    final node = doc.nodes[index];
+    final node = doc.getNodeAt(index);
     if (node is! NodeType) {
       throw Exception('Tried to access a ${node.runtimeType} as $NodeType');
     }

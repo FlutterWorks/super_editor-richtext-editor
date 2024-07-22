@@ -123,8 +123,6 @@ Future<(Editor, Document)> _pumpScaffold(WidgetTester tester, String contentMark
       body: Center(
         child: SuperEditor(
           editor: editor,
-          document: document,
-          composer: composer,
           componentBuilders: [
             TaskComponentBuilder(editor),
             ...defaultComponentBuilders,
@@ -140,7 +138,7 @@ Future<(Editor, Document)> _pumpScaffold(WidgetTester tester, String contentMark
 }
 
 Future<void> _simulateComposingRegion(WidgetTester tester, Editor editor, Document document) async {
-  final nodeId = document.nodes.first.id;
+  final nodeId = document.first.id;
   editor.execute([
     ChangeSelectionRequest(
       DocumentSelection.collapsed(
@@ -169,7 +167,7 @@ Future<void> _simulateComposingRegion(WidgetTester tester, Editor editor, Docume
 }
 
 Future<void> _clearComposingRegion(WidgetTester tester, Editor editor, Document document) async {
-  final nodeId = document.nodes.first.id;
+  final nodeId = document.first.id;
   editor.execute([
     ChangeSelectionRequest(
       DocumentSelection.collapsed(

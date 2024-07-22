@@ -63,7 +63,7 @@ class _ActionTagsFeatureDemoState extends State<ActionTagsFeatureDemo> {
     setState(() {
       _actions.clear();
 
-      for (final node in _document.nodes) {
+      for (final node in _document) {
         if (node is! TextNode) {
           continue;
         }
@@ -109,8 +109,6 @@ class _ActionTagsFeatureDemoState extends State<ActionTagsFeatureDemo> {
     return IntrinsicHeight(
       child: SuperEditor(
         editor: _editor,
-        document: _document,
-        composer: _composer,
         focusNode: _editorFocusNode,
         componentBuilders: [
           TaskComponentBuilder(_editor),
@@ -298,7 +296,7 @@ class ConvertSelectedTextNodeRequest implements EditRequest {
   int get hashCode => newType.hashCode;
 }
 
-class ConvertSelectedTextNodeCommand implements EditCommand {
+class ConvertSelectedTextNodeCommand extends EditCommand {
   ConvertSelectedTextNodeCommand(this.newType);
 
   final TextNodeType newType;

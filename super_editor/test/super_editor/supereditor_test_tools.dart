@@ -163,6 +163,11 @@ class TestSuperEditorConfigurator {
     return this;
   }
 
+  TestSuperEditorConfigurator useIosSelectionHeuristics(bool shouldUse) {
+    _config.useIosSelectionHeuristics = shouldUse;
+    return this;
+  }
+
   TestSuperEditorConfigurator withCaretPolicies({
     bool? displayCaretWithExpandedSelection,
   }) {
@@ -241,6 +246,11 @@ class TestSuperEditorConfigurator {
   /// Configures the [SuperEditor] to use the given [gestureMode].
   TestSuperEditorConfigurator withGestureMode(DocumentGestureMode gestureMode) {
     _config.gestureMode = gestureMode;
+    return this;
+  }
+
+  TestSuperEditorConfigurator withHistoryGroupingPolicy(HistoryGroupingPolicy policy) {
+    _config.historyGroupPolicy = policy;
     return this;
   }
 
@@ -417,7 +427,11 @@ class TestSuperEditorConfigurator {
     final layoutKey = _config.layoutKey!;
     final focusNode = _config.focusNode ?? FocusNode();
     final composer = MutableDocumentComposer(initialSelection: _config.selection);
-    final editor = createDefaultDocumentEditor(document: _config.document, composer: composer)
+    final editor = createDefaultDocumentEditor(
+      document: _config.document,
+      composer: composer,
+      historyGroupingPolicy: _config.historyGroupPolicy ?? neverMergePolicy,
+    )
       ..requestHandlers.insertAll(0, _config.addedRequestHandlers)
       ..reactionPipeline.insertAll(0, _config.addedReactions);
 
@@ -526,8 +540,10 @@ class _TestSuperEditorState extends State<_TestSuperEditor> {
     super.initState();
 
     _iOsControlsController = SuperEditorIosControlsController(
+      useIosSelectionHeuristics: widget.testConfiguration.useIosSelectionHeuristics,
       toolbarBuilder: widget.testConfiguration.iOSToolbarBuilder,
     );
+
     _androidControlsController = SuperEditorAndroidControlsController(
       toolbarBuilder: widget.testConfiguration.androidToolbarBuilder,
     );
@@ -569,8 +585,6 @@ class _TestSuperEditorState extends State<_TestSuperEditor> {
       autofocus: widget.testConfiguration.autoFocus,
       tapRegionGroupId: widget.testConfiguration.tapRegionGroupId,
       editor: widget.testDocumentContext.editor,
-      document: widget.testDocumentContext.document,
-      composer: widget.testDocumentContext.composer,
       documentLayoutKey: widget.testDocumentContext.layoutKey,
       inputSource: widget.testConfiguration.inputSource,
       selectionPolicies: widget.testConfiguration.selectionPolicies ?? const SuperEditorSelectionPolicies(),
@@ -664,12 +678,16 @@ class SuperEditorTestConfiguration {
   ScrollController? scrollController;
   bool insideCustomScrollView = false;
   DocumentGestureMode? gestureMode;
+  HistoryGroupingPolicy? historyGroupPolicy;
   TextInputSource? inputSource;
   SuperEditorSelectionPolicies? selectionPolicies;
   SelectionStyles? selectionStyles;
   bool displayCaretWithExpandedSelection = true;
   CaretStyle? caretStyle;
 
+  // By default we don't use iOS-style selection heuristics in tests because in tests
+  // we want to know exactly where we're placing the caret.
+  bool useIosSelectionHeuristics = false;
   double? iosCaretWidth;
   Color? iosHandleColor;
   double? iosHandleBallDiameter;
@@ -849,35 +867,34 @@ class EquivalentDocumentMatcher extends Matcher {
     bool nodeCountMismatch = false;
     bool nodeTypeOrContentMismatch = false;
 
-    if (_expectedDocument.nodes.length != actualDocument.nodes.length) {
-      messages
-          .add("expected ${_expectedDocument.nodes.length} document nodes but found ${actualDocument.nodes.length}");
+    if (_expectedDocument.nodeCount != actualDocument.nodeCount) {
+      messages.add("expected ${_expectedDocument.nodeCount} document nodes but found ${actualDocument.nodeCount}");
       nodeCountMismatch = true;
     } else {
       messages.add("document have the same number of nodes");
     }
 
-    final maxNodeCount = max(_expectedDocument.nodes.length, actualDocument.nodes.length);
+    final maxNodeCount = max(_expectedDocument.nodeCount, actualDocument.nodeCount);
     final nodeComparisons = List.generate(maxNodeCount, (index) => ["", "", " "]);
     for (int i = 0; i < maxNodeCount; i += 1) {
-      if (i < _expectedDocument.nodes.length && i < actualDocument.nodes.length) {
-        nodeComparisons[i][0] = _expectedDocument.nodes[i].runtimeType.toString();
-        nodeComparisons[i][1] = actualDocument.nodes[i].runtimeType.toString();
+      if (i < _expectedDocument.nodeCount && i < actualDocument.nodeCount) {
+        nodeComparisons[i][0] = _expectedDocument.getNodeAt(i)!.runtimeType.toString();
+        nodeComparisons[i][1] = actualDocument.getNodeAt(i)!.runtimeType.toString();
 
-        if (_expectedDocument.nodes[i].runtimeType != actualDocument.nodes[i].runtimeType) {
+        if (_expectedDocument.getNodeAt(i)!.runtimeType != actualDocument.getNodeAt(i)!.runtimeType) {
           nodeComparisons[i][2] = "Wrong Type";
           nodeTypeOrContentMismatch = true;
-        } else if (!_expectedDocument.nodes[i].hasEquivalentContent(actualDocument.nodes[i])) {
+        } else if (!_expectedDocument.getNodeAt(i)!.hasEquivalentContent(actualDocument.getNodeAt(i)!)) {
           nodeComparisons[i][2] = "Different Content";
           nodeTypeOrContentMismatch = true;
         }
-      } else if (i < _expectedDocument.nodes.length) {
-        nodeComparisons[i][0] = _expectedDocument.nodes[i].runtimeType.toString();
+      } else if (i < _expectedDocument.nodeCount) {
+        nodeComparisons[i][0] = _expectedDocument.getNodeAt(i)!.runtimeType.toString();
         nodeComparisons[i][1] = "NA";
         nodeComparisons[i][2] = "Missing Node";
-      } else if (i < actualDocument.nodes.length) {
+      } else if (i < actualDocument.nodeCount) {
         nodeComparisons[i][0] = "NA";
-        nodeComparisons[i][1] = actualDocument.nodes[i].runtimeType.toString();
+        nodeComparisons[i][1] = actualDocument.getNodeAt(i)!.runtimeType.toString();
         nodeComparisons[i][2] = "Missing Node";
       }
     }
@@ -922,7 +939,7 @@ class FakeImageComponentBuilder implements ComponentBuilder {
     return ImageComponent(
       componentKey: componentContext.componentKey,
       imageUrl: componentViewModel.imageUrl,
-      selection: componentViewModel.selection,
+      selection: componentViewModel.selection?.nodeSelection as UpstreamDownstreamNodeSelection?,
       selectionColor: componentViewModel.selectionColor,
       imageBuilder: (context, imageUrl) => ColoredBox(
         color: fillColor ?? Colors.transparent,

@@ -64,7 +64,7 @@ class _UserTagsFeatureDemoState extends State<UserTagsFeatureDemo> {
     setState(() {
       _users.clear();
 
-      for (final node in _document.nodes) {
+      for (final node in _document) {
         if (node is! TextNode) {
           continue;
         }
@@ -110,8 +110,6 @@ class _UserTagsFeatureDemoState extends State<UserTagsFeatureDemo> {
     return IntrinsicHeight(
       child: SuperEditor(
         editor: _editor,
-        document: _document,
-        composer: _composer,
         focusNode: _editorFocusNode,
         stylesheet: defaultStylesheet.copyWith(
           inlineTextStyler: (attributions, existingStyle) {

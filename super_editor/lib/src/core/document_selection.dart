@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'package:super_editor/src/default_editor/text.dart';
+
 import 'document.dart';
 
 /// A selection within a [Document].
@@ -86,6 +88,20 @@ class DocumentSelection extends DocumentRange {
 
   @override
   String toString() {
+    if (base.nodeId == extent.nodeId) {
+      final basePosition = base.nodePosition;
+      final extentPosition = extent.nodePosition;
+      if (basePosition is TextNodePosition && extentPosition is TextNodePosition) {
+        if (basePosition.offset == extentPosition.offset) {
+          return "[Selection] - ${base.nodeId}: ${extentPosition.offset}";
+        }
+
+        return "[Selection] - ${base.nodeId}: [${basePosition.offset}, ${extentPosition.offset}]";
+      }
+
+      return "[Selection] - ${base.nodeId}: [${base.nodePosition}, ${extent.nodePosition}]";
+    }
+
     return '[DocumentSelection] - \n  base: ($base),\n  extent: ($extent)';
   }
 
@@ -283,7 +299,21 @@ class DocumentRange {
 
   @override
   String toString() {
-    return '[DocumentRange] - start: ($start), end: ($end)';
+    if (start.nodeId == end.nodeId) {
+      final startPosition = start.nodePosition;
+      final endPosition = end.nodePosition;
+      if (startPosition is TextNodePosition && endPosition is TextNodePosition) {
+        if (startPosition.offset == endPosition.offset) {
+          return "[Range] - ${start.nodeId}: ${endPosition.offset}";
+        }
+
+        return "[Range] - ${start.nodeId}: [${startPosition.offset}, ${endPosition.offset}]";
+      }
+
+      return "[Range] - ${start.nodeId}: [${start.nodePosition}, ${end.nodePosition}]";
+    }
+
+    return '[Range] - \n  start: ($start),\n  end: ($end)';
   }
 }
 
@@ -346,11 +376,9 @@ extension InspectDocumentSelection on Document {
   /// from upstream to downstream.
   List<DocumentNode> getNodesInContentOrder(DocumentSelection selection) {
     final upstreamPosition = selectUpstreamPosition(selection.base, selection.extent);
-    final upstreamIndex = getNodeIndexById(upstreamPosition.nodeId);
     final downstreamPosition = selectDownstreamPosition(selection.base, selection.extent);
-    final downstreamIndex = getNodeIndexById(downstreamPosition.nodeId);
 
-    return nodes.sublist(upstreamIndex, downstreamIndex + 1);
+    return getNodesInside(upstreamPosition, downstreamPosition);
   }
 
   /// Given [docPosition1] and [docPosition2], returns the `DocumentPosition` that

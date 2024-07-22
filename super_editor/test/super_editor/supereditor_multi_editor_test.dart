@@ -45,16 +45,16 @@ void main() {
       await tester.pumpWidget(const _SwitchEditorsDemo());
 
       // Ensure that the first editor content is visible.
-      expect(SuperEditorInspector.findWidgetForComponent<TextComponent>("Editor1_Header"), isNotNull);
-      expect(SuperEditorInspector.findWidgetForComponent<TextComponent>("Editor1_Para"), isNotNull);
+      expect(SuperEditorInspector.findWidgetForComponent<ParagraphComponent>("Editor1_Header"), isNotNull);
+      expect(SuperEditorInspector.findWidgetForComponent<ParagraphComponent>("Editor1_Para"), isNotNull);
 
       // Switch to the second editor.
       await tester.tap(find.byKey(const ValueKey("Editor2")));
       await tester.pump();
 
       // Ensure that the second editor content is visible.
-      expect(SuperEditorInspector.findWidgetForComponent<TextComponent>("Editor2_Header"), isNotNull);
-      expect(SuperEditorInspector.findWidgetForComponent<TextComponent>("Editor2_Para"), isNotNull);
+      expect(SuperEditorInspector.findWidgetForComponent<ParagraphComponent>("Editor2_Header"), isNotNull);
+      expect(SuperEditorInspector.findWidgetForComponent<ParagraphComponent>("Editor2_Para"), isNotNull);
     });
 
     testWidgetsOnAllPlatforms("restores selection when switching back to a previously selected editor", (tester) async {
@@ -294,8 +294,6 @@ class _SwitchEditorsDemoState extends State<_SwitchEditorsDemo> {
             Expanded(
               child: SuperEditor(
                 editor: _activeDocumentEditor,
-                document: _activeDocument,
-                composer: _activeComposer,
                 stylesheet: defaultStylesheet.copyWith(
                   documentPadding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
                 ),

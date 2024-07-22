@@ -63,8 +63,6 @@ class _DocsEditorState extends State<DocsEditor> {
         return SuperEditor(
           focusNode: _editorFocusNode,
           editor: widget.editor,
-          document: widget.document,
-          composer: widget.composer,
           stylesheet: defaultStylesheet.copyWith(
             addRulesAfter: docsStylesheet,
             inlineTextStyler: _applyFontFamily,
@@ -102,39 +100,6 @@ class _DocsEditorState extends State<DocsEditor> {
     }
 
     return styles;
-  }
-}
-
-/// Attribution to be used within [AttributedText] to
-/// represent an inline span of a font family change.
-///
-/// Every [FontFamilyAttribution] is considered equivalent so
-/// that [AttributedText] prevents multiple [FontFamilyAttribution]s
-/// from overlapping.
-class FontFamilyAttribution implements Attribution {
-  FontFamilyAttribution(this.fontFamily);
-
-  @override
-  String get id => fontFamily;
-
-  final String fontFamily;
-
-  @override
-  bool canMergeWith(Attribution other) {
-    return this == other;
-  }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is FontFamilyAttribution && runtimeType == other.runtimeType && fontFamily == other.fontFamily;
-
-  @override
-  int get hashCode => fontFamily.hashCode;
-
-  @override
-  String toString() {
-    return '[FontFamilyAttribution]: $fontFamily';
   }
 }
 

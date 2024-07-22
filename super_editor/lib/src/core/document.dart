@@ -17,10 +17,22 @@ import 'package:flutter/widgets.dart';
 /// content.
 ///
 /// To edit the content of a document, see [DocumentEditor].
-abstract class Document {
-  /// Returns all of the content within the document as a list
-  /// of [DocumentNode]s.
-  List<DocumentNode> get nodes;
+abstract class Document implements Iterable<DocumentNode> {
+  /// The number of [DocumentNode]s in this [Document].
+  int get nodeCount;
+
+  /// Returns `true` if this [Document] has zero nodes, or `false` if it
+  /// has `1+ nodes.
+  @override
+  bool get isEmpty;
+
+  /// Returns the first [DocumentNode] in this [Document], or `null` if this
+  /// [Document] is empty.
+  DocumentNode? get firstOrNull;
+
+  /// Returns the last [DocumentNode] in this [Document], or `null` if this
+  /// [Document] is empty.
+  DocumentNode? get lastOrNull;
 
   /// Returns the [DocumentNode] with the given [nodeId], or [null]
   /// if no such node exists.
@@ -99,22 +111,30 @@ class DocumentChangeLog {
 
 /// Marker interface for all document changes.
 abstract class DocumentChange {
-  // Marker interface
+  const DocumentChange();
+
+  /// Describes this change in a human-readable way.
+  String describe() => toString();
 }
 
 /// A [DocumentChange] that impacts a single, specified [DocumentNode] with [nodeId].
-abstract class NodeDocumentChange implements DocumentChange {
+abstract class NodeDocumentChange extends DocumentChange {
+  const NodeDocumentChange();
+
   String get nodeId;
 }
 
 /// A new [DocumentNode] was inserted in the [Document].
-class NodeInsertedEvent implements NodeDocumentChange {
+class NodeInsertedEvent extends NodeDocumentChange {
   const NodeInsertedEvent(this.nodeId, this.insertionIndex);
 
   @override
   final String nodeId;
 
   final int insertionIndex;
+
+  @override
+  String describe() => "Inserted node: $nodeId";
 
   @override
   String toString() => "NodeInsertedEvent ($nodeId)";
@@ -132,7 +152,7 @@ class NodeInsertedEvent implements NodeDocumentChange {
 }
 
 /// A [DocumentNode] was moved to a new index.
-class NodeMovedEvent implements NodeDocumentChange {
+class NodeMovedEvent extends NodeDocumentChange {
   const NodeMovedEvent({
     required this.nodeId,
     required this.from,
@@ -143,6 +163,9 @@ class NodeMovedEvent implements NodeDocumentChange {
   final String nodeId;
   final int from;
   final int to;
+
+  @override
+  String describe() => "Moved node ($nodeId): $from -> $to";
 
   @override
   String toString() => "NodeMovedEvent ($nodeId: $from -> $to)";
@@ -161,13 +184,16 @@ class NodeMovedEvent implements NodeDocumentChange {
 }
 
 /// A [DocumentNode] was removed from the [Document].
-class NodeRemovedEvent implements NodeDocumentChange {
+class NodeRemovedEvent extends NodeDocumentChange {
   const NodeRemovedEvent(this.nodeId, this.removedNode);
 
   @override
   final String nodeId;
 
   final DocumentNode removedNode;
+
+  @override
+  String describe() => "Removed node: $nodeId";
 
   @override
   String toString() => "NodeRemovedEvent ($nodeId)";
@@ -185,11 +211,14 @@ class NodeRemovedEvent implements NodeDocumentChange {
 /// A node change might signify a content change, such as text changing in a paragraph, or
 /// it might signify a node changing its type of content, such as converting a paragraph
 /// to an image.
-class NodeChangeEvent implements NodeDocumentChange {
+class NodeChangeEvent extends NodeDocumentChange {
   const NodeChangeEvent(this.nodeId);
 
   @override
   final String nodeId;
+
+  @override
+  String describe() => "Changed node: $nodeId";
 
   @override
   String toString() => "NodeChangeEvent ($nodeId)";
@@ -223,7 +252,7 @@ class DocumentPosition {
   ///
   /// ```dart
   /// final documentPosition = DocumentPosition(
-  ///   nodeId: documentEditor.document.nodes.first.id,
+  ///   nodeId: documentEditor.document.first.id,
   ///   nodePosition: TextNodePosition(offset: 1),
   /// );
   /// ```
@@ -380,6 +409,8 @@ abstract class DocumentNode implements ChangeNotifier {
 
   /// Returns a copy of this node's metadata.
   Map<String, dynamic> copyMetadata() => Map.from(_metadata);
+
+  DocumentNode copy();
 
   @override
   bool operator ==(Object other) =>

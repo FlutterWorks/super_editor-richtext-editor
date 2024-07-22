@@ -38,6 +38,52 @@ void main() {
         expect(richText.getSpanForPosition(const TextPosition(offset: 6))!.style!.color, Colors.white);
         expect(richText.getSpanForPosition(const TextPosition(offset: 10))!.style!.color, Colors.white);
       });
+
+      testWidgetsOnAllPlatforms("overrides existing color attributions", (tester) async {
+        final stylesheet = defaultStylesheet.copyWith(
+          selectedTextColorStrategy: ({required Color originalTextColor, required Color selectionHighlightColor}) {
+            return Colors.white;
+          },
+        );
+
+        // Pump an editor with green text throught the document.
+        await tester //
+            .createDocument()
+            .withCustomContent(
+              MutableDocument(
+                nodes: [
+                  ParagraphNode(
+                    id: '1',
+                    text: AttributedText(
+                      'Lorem ipsum dolor',
+                      AttributedSpans(
+                        attributions: [
+                          const SpanMarker(
+                              attribution: ColorAttribution(Colors.green), offset: 0, markerType: SpanMarkerType.start),
+                          const SpanMarker(
+                              attribution: ColorAttribution(Colors.green), offset: 16, markerType: SpanMarkerType.end),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+            .useStylesheet(stylesheet)
+            .pump();
+
+        // Double tap to select the word "Lorem".
+        await tester.doubleTapInParagraph('1', 2);
+
+        // Ensure that the first word is white and the rest is green.
+        final richText = SuperEditorInspector.findRichTextInParagraph('1');
+
+        expect(richText.getSpanForPosition(const TextPosition(offset: 0))!.style!.color, Colors.white);
+        expect(richText.getSpanForPosition(const TextPosition(offset: 4))!.style!.color, Colors.white);
+
+        expect(richText.getSpanForPosition(const TextPosition(offset: 5))!.style!.color, Colors.green);
+        expect(richText.getSpanForPosition(const TextPosition(offset: 16))!.style!.color, Colors.green);
+      });
     });
 
     testWidgetsOnArbitraryDesktop("calculates upstream document selection within a single node", (tester) async {
@@ -97,7 +143,7 @@ void main() {
           .createDocument() //
           .fromMarkdown("This is paragraph one.\nThis is paragraph two.") //
           .pump();
-      final nodeId = testContext.findEditContext().document.nodes.first.id;
+      final nodeId = testContext.findEditContext().document.first.id;
 
       /// Triple tap on the first line in the paragraph node.
       await tester.tripleTapInParagraph(nodeId, 10);
@@ -128,7 +174,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
+      final firstParagraphId = testContext.findEditContext().document.first.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -155,7 +201,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
+      final secondParagraphId = testContext.findEditContext().document.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -187,7 +233,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
+      final secondParagraphId = testContext.findEditContext().document.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -219,7 +265,7 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
+      final firstParagraphId = testContext.findEditContext().document.first.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -246,8 +292,8 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
-      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
+      final firstParagraphId = testContext.findEditContext().document.first.id;
+      final secondParagraphId = testContext.findEditContext().document.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -277,8 +323,8 @@ void main() {
         (tester) async {
       final testContext = await _pumpUnselectableComponentTestApp(tester);
 
-      final firstParagraphId = testContext.findEditContext().document.nodes.first.id;
-      final secondParagraphId = testContext.findEditContext().document.nodes.last.id;
+      final firstParagraphId = testContext.findEditContext().document.first.id;
+      final secondParagraphId = testContext.findEditContext().document.last.id;
 
       // TODO: replace the following direct layout access with a simulated user
       // drag, once we've merged some new dragging tools in #645.
@@ -449,7 +495,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: doc!.nodes.last.id,
+            nodeId: doc!.last.id,
             nodePosition: const TextNodePosition(offset: 477),
           ),
         ),
@@ -493,7 +539,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: doc!.nodes.last.id,
+            nodeId: doc!.last.id,
             nodePosition: const TextNodePosition(offset: 477),
           ),
         ),
@@ -527,7 +573,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: doc!.nodes.last.id,
+            nodeId: doc!.last.id,
             nodePosition: const TextNodePosition(offset: 477),
           ),
         ),
@@ -553,7 +599,7 @@ void main() {
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: doc!.nodes.last.id,
+            nodeId: doc!.last.id,
             nodePosition: const TextNodePosition(offset: 477),
           ),
         ),
@@ -596,7 +642,7 @@ Second Paragraph
       await tester.pumpAndSettle();
 
       final doc = SuperEditorInspector.findDocument();
-      final secondParagraphNodeId = doc!.nodes[1].id;
+      final secondParagraphNodeId = doc!.getNodeAt(1)!.id;
 
       // Ensure selection is at the last character of the second paragraph.
       expect(
@@ -1133,7 +1179,7 @@ Second Paragraph
         SuperEditorInspector.findDocumentSelection(),
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: doc.nodes.last.id,
+            nodeId: doc.last.id,
             nodePosition: const TextNodePosition(offset: 477),
           ),
         ),
@@ -1144,7 +1190,7 @@ Second Paragraph
         ChangeSelectionRequest(
           DocumentSelection.collapsed(
             position: DocumentPosition(
-              nodeId: doc.nodes.last.id,
+              nodeId: doc.last.id,
               nodePosition: const TextNodePosition(offset: 477),
             ),
           ),

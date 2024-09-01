@@ -565,5 +565,221 @@ void main() {
         expect((document.getNodeAt(2)! as ParagraphNode).text.text, "");
       });
     });
+
+    group("custom parsers >", () {
+      test("works with ambiguous formats", () {
+        // Consider the standard Delta list item format:
+        // {
+        //   "list": "ordered"
+        // }
+        //
+        // We want to ensure that an ambiguous custom format is respected
+        // without issue, e.g.,
+        // {
+        //   "list": {
+        //     "list": "ordered"
+        //   }
+        // }
+        parseQuillDeltaOps([
+          {"insert": "Paragraph one"},
+          {
+            "attributes": {
+              "header": {
+                "header": 1,
+              },
+            },
+            "insert": "\n"
+          },
+          {"insert": "Paragraph two"},
+          {
+            "attributes": {
+              "blockquote": {
+                "blockquote": true,
+              },
+            },
+            "insert": "\n"
+          },
+          {"insert": "Paragraph three"},
+          {
+            "attributes": {
+              "code-block": {
+                "code-block": "dart",
+              },
+            },
+            "insert": "\n"
+          },
+          {"insert": "Paragraph four"},
+          {
+            "attributes": {
+              "list": {
+                "list": "ordered",
+              },
+            },
+            "insert": "\n"
+          },
+          {"insert": "Paragraph five"},
+          {
+            "attributes": {
+              "align": {
+                "align": "left",
+              },
+            },
+            "insert": "\n"
+          },
+          {"insert": "Paragraph six\n"},
+        ]);
+
+        // If we get here without an exception, the test passes. This means that
+        // the standard
+      });
+
+      test("defers to higher priority ambiguous format", () {
+        // Goal of test: when a custom parser has a format that's ambiguous as compared to
+        // a standard format, the custom parser is used instead of the standard parser,
+        // when the custom parser is higher in the parser list.
+        final document = parseQuillDeltaOps([
+          {"insert": "Paragraph one"},
+          {
+            "attributes": {
+              "list": {
+                "list": "ordered",
+              },
+            },
+            "insert": "\n"
+          },
+          {"insert": "Paragraph two\n"},
+        ], blockFormats: [
+          const _CustomListItemBlockFormat(),
+          ...defaultBlockFormats,
+        ]);
+
+        expect(document.first, isA<TaskNode>());
+      });
+
+      test("can parse inline embeds", () {
+        final document = parseQuillDeltaOps([
+          {"insert": "Have you heard about inline embeds, "},
+          {
+            "insert": {
+              "tag": {
+                "type": "user",
+                "userId": "123456",
+                "text": "@John Smith",
+              },
+            },
+          },
+          {"insert": "?\n"},
+        ], inlineEmbedFormats: [
+          const _UserTagEmbedParser(),
+        ]);
+
+        final text = (document.first as ParagraphNode).text;
+        expect(text.text, "Have you heard about inline embeds, @John Smith?");
+        expect(
+          text.spans,
+          AttributedSpans(
+            attributions: [
+              const SpanMarker(
+                  attribution: _UserTagAttribution("123456"), offset: 36, markerType: SpanMarkerType.start),
+              const SpanMarker(attribution: _UserTagAttribution("123456"), offset: 46, markerType: SpanMarkerType.end),
+            ],
+          ),
+        );
+      });
+    });
   });
+}
+
+class _CustomListItemBlockFormat extends FilterByNameBlockDeltaFormat {
+  const _CustomListItemBlockFormat() : super("list");
+
+  @override
+  List<EditRequest>? doApplyFormat(Editor editor, Object value) {
+    if (value is! Map<String, dynamic>) {
+      return null;
+    }
+
+    final composer = editor.context.find<MutableDocumentComposer>(Editor.composerKey);
+    return [
+      ConvertParagraphToTaskRequest(
+        nodeId: composer.selection!.extent.nodeId,
+      ),
+    ];
+  }
+}
+
+class _UserTagEmbedParser implements InlineEmbedFormat {
+  const _UserTagEmbedParser();
+
+  @override
+  bool insert(Editor editor, DocumentComposer composer, Map<String, dynamic> embed) {
+    if (embed
+        case {
+          "tag": {
+            "type": String type,
+            "userId": String userId,
+            "text": String text,
+          },
+        }) {
+      if (type != "user") {
+        // This isn't a user tag. Fizzle.
+        return false;
+      }
+
+      final selection = composer.selection;
+      if (selection == null) {
+        // The selection should always be defined during insertions. This
+        // shouldn't happen. Fizzle.
+        return false;
+      }
+      if (!selection.isCollapsed) {
+        // The selection should always be collapsed during insertions. This
+        // shouldn't happen. Fizzle.
+        return false;
+      }
+
+      final extentPosition = selection.extent;
+      if (extentPosition.nodePosition is! TextNodePosition) {
+        // Insertions should always happen in text nodes. This shouldn't happen.
+        // Fizzle.
+        return false;
+      }
+
+      editor.execute([
+        InsertTextRequest(
+          documentPosition: extentPosition,
+          textToInsert: text,
+          attributions: {
+            _UserTagAttribution(userId),
+          },
+        ),
+      ]);
+
+      return true;
+    }
+
+    return false;
+  }
+}
+
+class _UserTagAttribution implements Attribution {
+  const _UserTagAttribution(this.userId);
+
+  @override
+  String get id => userId;
+
+  final String userId;
+
+  @override
+  bool canMergeWith(Attribution other) {
+    return other is _UserTagAttribution && userId == other.userId;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _UserTagAttribution && runtimeType == other.runtimeType && userId == other.userId;
+
+  @override
+  int get hashCode => userId.hashCode;
 }

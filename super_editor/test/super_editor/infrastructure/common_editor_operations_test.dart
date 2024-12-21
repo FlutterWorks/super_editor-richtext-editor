@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
@@ -42,7 +43,7 @@ void main() {
           documentLayoutResolver: () => FakeDocumentLayout(),
         );
 
-        commonOps.deleteSelection();
+        commonOps.deleteSelection(TextAffinity.downstream);
 
         expect(document.nodeCount, 1);
         expect(document.first.id, "2");
@@ -80,7 +81,7 @@ void main() {
           documentLayoutResolver: () => FakeDocumentLayout(),
         );
 
-        commonOps.deleteSelection();
+        commonOps.deleteSelection(TextAffinity.downstream);
 
         expect(document.nodeCount, 1);
         expect(document.first.id, "2");
@@ -118,7 +119,7 @@ void main() {
           documentLayoutResolver: () => FakeDocumentLayout(),
         );
 
-        commonOps.deleteSelection();
+        commonOps.deleteSelection(TextAffinity.downstream);
 
         expect(document.nodeCount, 1);
         expect(document.first.id, "1");
@@ -151,7 +152,7 @@ void main() {
           documentLayoutResolver: () => FakeDocumentLayout(),
         );
 
-        commonOps.deleteSelection();
+        commonOps.deleteSelection(TextAffinity.downstream);
 
         expect(document.nodeCount, 1);
         expect(document.first, isA<ParagraphNode>());
@@ -182,6 +183,29 @@ void main() {
         expect(
           SuperEditorInspector.findDocument(),
           equalsMarkdown('[https://goo](https://google.com)Some text[gle.com](https://google.com)'),
+        );
+      });
+    });
+
+    group('getDocumentPositionAfterExpandedDeletion', () {
+      test('returns null for collapsed selection', () {
+        final node = HorizontalRuleNode(
+          id: "1",
+        );
+
+        expect(
+          CommonEditorOperations.getDocumentPositionAfterExpandedDeletion(
+            document: MutableDocument(nodes: [
+              node,
+            ]),
+            selection: DocumentSelection.collapsed(
+              position: DocumentPosition(
+                nodeId: node.id,
+                nodePosition: node.endPosition,
+              ),
+            ),
+          ),
+          isNull,
         );
       });
     });

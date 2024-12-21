@@ -11,6 +11,7 @@ import 'package:super_editor/src/core/edit_context.dart';
 import 'package:super_editor/src/core/editor.dart';
 import 'package:super_editor/src/default_editor/attributions.dart';
 import 'package:super_editor/src/default_editor/blocks/indentation.dart';
+import 'package:super_editor/src/default_editor/box_component.dart';
 import 'package:super_editor/src/default_editor/multi_node_editing.dart';
 import 'package:super_editor/src/default_editor/text.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
@@ -76,7 +77,7 @@ class ParagraphComponentBuilder implements ComponentBuilder {
       return null;
     }
 
-    final textDirection = getParagraphDirection(node.text.text);
+    final textDirection = getParagraphDirection(node.text.toPlainText());
 
     TextAlign textAlign = (textDirection == TextDirection.ltr) ? TextAlign.left : TextAlign.right;
     final textAlignName = node.getMetadataValue('textAlign');
@@ -142,6 +143,7 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
     this.indentCalculator = defaultParagraphIndentCalculator,
     required this.text,
     required this.textStyleBuilder,
+    this.inlineWidgetBuilders = const [],
     this.textDirection = TextDirection.ltr,
     this.textAlignment = TextAlign.left,
     this.textScaler,
@@ -175,6 +177,8 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
   @override
   AttributionStyleBuilder textStyleBuilder;
   @override
+  InlineWidgetBuilderChain inlineWidgetBuilders;
+  @override
   TextDirection textDirection;
   @override
   TextAlign textAlignment;
@@ -202,6 +206,7 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       indentCalculator: indentCalculator,
       text: text,
       textStyleBuilder: textStyleBuilder,
+      inlineWidgetBuilders: inlineWidgetBuilders,
       textDirection: textDirection,
       textAlignment: textAlignment,
       textScaler: textScaler,
@@ -311,6 +316,7 @@ class _ParagraphComponentState extends State<ParagraphComponent>
             textAlign: widget.viewModel.textAlignment,
             textScaler: widget.viewModel.textScaler,
             textStyleBuilder: widget.viewModel.textStyleBuilder,
+            inlineWidgetBuilders: widget.viewModel.inlineWidgetBuilders,
             metadata: widget.viewModel.blockType != null
                 ? {
                     'blockType': widget.viewModel.blockType,
@@ -484,12 +490,29 @@ class CombineParagraphsCommand extends EditCommand {
       return;
     }
 
-    final nodeAbove = document.getNodeBefore(secondNode);
+    DocumentNode? nodeAbove = document.getNodeBefore(secondNode);
     if (nodeAbove == null) {
       editorDocLog.info('At top of document. Cannot merge with node above.');
       return;
     }
-    if (nodeAbove.id != firstNodeId) {
+
+    // Search for a node above the second node that has the id equal to `firstNodeId`.
+    //
+    // A `CombineParagraphsRequest` might reference nodes that are not contiguous.
+    // For example, we might have:
+    // - Paragraph 1
+    // - <hr> (non-selectable, non-deletable)
+    // - Paragraph 2
+    //
+    // If this case, it's possible to combine Paragraph 1 and Paragraph 2.
+    //
+    // Because of this, we need to loop until we find the node instead of just
+    // comparing with the node immediately above the second node.
+    while (nodeAbove != null && nodeAbove.id != firstNodeId) {
+      nodeAbove = document.getNodeBefore(nodeAbove);
+    }
+
+    if (nodeAbove == null) {
       editorDocLog.info('The specified `firstNodeId` is not the node before `secondNodeId`.');
       return;
     }
@@ -499,7 +522,7 @@ class CombineParagraphsCommand extends EditCommand {
     }
 
     // Combine the text and delete the currently selected node.
-    final isTopNodeEmpty = nodeAbove.text.text.isEmpty;
+    final isTopNodeEmpty = nodeAbove.text.isEmpty;
     nodeAbove.text = nodeAbove.text.copyAndAppend(secondNode.text);
 
     // Avoid overriding the metadata when the nodeAbove isn't a ParagraphNode.
@@ -601,8 +624,8 @@ class SplitParagraphCommand extends EditCommand {
     final startText = text.copyText(0, splitPosition.offset);
     final endText = text.copyText(splitPosition.offset);
     editorDocLog.info('Splitting paragraph:');
-    editorDocLog.info(' - start text: "${startText.text}"');
-    editorDocLog.info(' - end text: "${endText.text}"');
+    editorDocLog.info(' - start text: "${startText.toPlainText()}"');
+    editorDocLog.info(' - end text: "${endText.toPlainText()}"');
 
     if (splitPosition.offset == text.length) {
       // The paragraph was split at the very end, the user is creating a new,
@@ -683,7 +706,7 @@ class SplitParagraphCommand extends EditCommand {
       ),
     ];
 
-    if (newNode.text.text.isEmpty) {
+    if (newNode.text.isEmpty) {
       executor.logChanges([
         SubmitParagraphIntention.start(),
         ...documentChanges,
@@ -733,7 +756,11 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
       return;
     }
 
-    final nodeBefore = document.getNodeBefore(node);
+    DocumentNode? nodeBefore = document.getNodeBefore(node);
+    while (nodeBefore is BlockNode && !nodeBefore.isDeletable) {
+      nodeBefore = document.getNodeBefore(nodeBefore);
+    }
+
     if (nodeBefore == null) {
       return;
     }
@@ -756,7 +783,7 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
 
     moveSelectionToEndOfPrecedingNode(executor, document, composer);
 
-    if ((node as TextNode).text.text.isEmpty) {
+    if ((node as TextNode).text.isEmpty) {
       // The caret is at the beginning of an empty TextNode and the preceding
       // node is not a TextNode. Delete the current TextNode and move the
       // selection up to the preceding node if exist.
@@ -766,6 +793,10 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
     }
   }
 
+  /// Merges the selected [TextNode] with the upstream [TextNode].
+  ///
+  /// If there are non-deletable [BlockNode]s between the two [TextNode]s,
+  /// the [BlockNode]s are retained without modification.
   bool mergeTextNodeWithUpstreamTextNode(
     CommandExecutor executor,
     MutableDocument document,
@@ -776,7 +807,11 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
       return false;
     }
 
-    final nodeAbove = document.getNodeBefore(node);
+    DocumentNode? nodeAbove = document.getNodeBefore(node);
+    while (nodeAbove is BlockNode && !nodeAbove.isDeletable) {
+      nodeAbove = document.getNodeBefore(nodeAbove);
+    }
+
     if (nodeAbove == null) {
       return false;
     }
@@ -1010,7 +1045,7 @@ ExecutionInstruction enterToUnIndentParagraph({
     // Nothing to un-indent.
     return ExecutionInstruction.continueExecution;
   }
-  if (paragraph.text.text.isNotEmpty) {
+  if (paragraph.text.isNotEmpty) {
     // We only un-indent when the user presses Enter in an empty paragraph.
     return ExecutionInstruction.continueExecution;
   }
@@ -1297,7 +1332,7 @@ ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
     return ExecutionInstruction.continueExecution;
   }
 
-  if (node.text.text.isEmpty) {
+  if (node.text.isEmpty) {
     return ExecutionInstruction.continueExecution;
   }
 

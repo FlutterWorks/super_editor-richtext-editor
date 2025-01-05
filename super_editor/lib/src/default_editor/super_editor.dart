@@ -423,6 +423,8 @@ class SuperEditorState extends State<SuperEditor> {
 
   late SoftwareKeyboardController _softwareKeyboardController;
 
+  late ValueNotifier<bool> _isImeConnected;
+
   @override
   void initState() {
     super.initState();
@@ -448,6 +450,8 @@ class SuperEditorState extends State<SuperEditor> {
     _selectionLinks = widget.selectionLayerLinks ?? SelectionLayerLinks();
 
     _softwareKeyboardController = widget.softwareKeyboardController ?? SoftwareKeyboardController();
+
+    _isImeConnected = widget.isImeConnected ?? ValueNotifier(false);
 
     widget.editor.context.put(
       Editor.layoutKey,
@@ -511,6 +515,10 @@ class SuperEditorState extends State<SuperEditor> {
 
     if (widget.softwareKeyboardController != oldWidget.softwareKeyboardController) {
       _softwareKeyboardController = widget.softwareKeyboardController ?? SoftwareKeyboardController();
+    }
+
+    if (widget.isImeConnected != oldWidget.isImeConnected) {
+      _isImeConnected = widget.isImeConnected ?? ValueNotifier(false);
     }
 
     _recomputeIfLayoutShouldShowCaret();
@@ -797,7 +805,7 @@ class SuperEditorState extends State<SuperEditor> {
             ..._keyboardActions,
           ],
           selectorHandlers: widget.selectorHandlers ?? defaultEditorSelectorHandlers,
-          isImeConnected: widget.isImeConnected,
+          isImeConnected: _isImeConnected,
           child: child,
         );
     }
@@ -882,6 +890,7 @@ class SuperEditorState extends State<SuperEditor> {
           document: editContext.document,
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
+          openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
           openSoftwareKeyboard: _openSoftareKeyboard,
           contentTapHandlers: _contentTapHandlers,
           scrollController: _scrollController,
@@ -897,7 +906,9 @@ class SuperEditorState extends State<SuperEditor> {
           document: editContext.document,
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
+          openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
           openSoftwareKeyboard: _openSoftareKeyboard,
+          isImeConnected: _isImeConnected,
           contentTapHandlers: _contentTapHandlers,
           scrollController: _scrollController,
           dragHandleAutoScroller: _dragHandleAutoScroller,
@@ -1157,6 +1168,7 @@ class SuperEditorSelectionPolicies {
   const SuperEditorSelectionPolicies({
     this.placeCaretAtEndOfDocumentOnGainFocus = true,
     this.restorePreviousSelectionOnGainFocus = true,
+    this.openKeyboardWhenTappingExistingSelection = true,
     this.clearSelectionWhenEditorLosesFocus = true,
     this.clearSelectionWhenImeConnectionCloses = true,
   });
@@ -1170,6 +1182,30 @@ class SuperEditorSelectionPolicies {
   /// Whether the editor's previous selection should be restored when the editor re-gains
   /// focus, after having previous lost focus.
   final bool restorePreviousSelectionOnGainFocus;
+
+  /// {@template openKeyboardWhenTappingExistingSelection}
+  /// Whether the software keyboard should be opened when the user taps on the existing
+  /// selection.
+  ///
+  /// Defaults to `true`.
+  ///
+  /// Typically, when an editor has a selection, the software keyboard is already open.
+  /// However, in some cases, the user might want to temporarily close the keyboard. For
+  /// example, the user might replace the keyboard with a custom emoji picker panel.
+  ///
+  /// When the user is done with the temporary keyboard replacement, the user then wants to
+  /// open the keyboard again, so the user taps on the caret. If this property is `true`
+  /// then tapping on the caret will open the keyboard again.
+  ///
+  /// In other, similar cases, the user might want to be able to tap on the editor without
+  /// opening the keyboard. For example, the user might open a keyboard panel that can insert
+  /// various types of content. In that case, the user might want to move the caret to then
+  /// insert something from the panel. In this case, it's easy to accidentally tap on the
+  /// existing caret, which would then close the panel and open the keyboard. To avoid this
+  /// annoyance, this property can be set to `false`, in which case tapping on the caret won't
+  /// automatically open the keyboard. It's left to the app to re-open the keyboard when desired.
+  /// {@endtemplate}
+  final bool openKeyboardWhenTappingExistingSelection;
 
   /// Whether the editor's selection should be removed when the editor loses
   /// all focus (not just primary focus).

@@ -156,6 +156,25 @@ class SuperEditorIosControlsController {
   /// Tells the caret to stop blinking by setting [shouldCaretBlink] to `false`.
   void doNotBlinkCaret() => _shouldCaretBlink.value = false;
 
+  /// {@macro are_selection_handles_allowed}
+  ValueListenable<bool> get areSelectionHandlesAllowed => _areSelectionHandlesAllowed;
+  final _areSelectionHandlesAllowed = ValueNotifier<bool>(true);
+
+  /// Temporarily prevents any selection handles from being displayed.
+  ///
+  /// Call this when you want to select some content, but don't want to show the drag handles.
+  /// [allowSelectionHandles] must be called to allow the drag handles to be displayed again.
+  void allowSelectionHandles() => _areSelectionHandlesAllowed.value = true;
+
+  /// Allows the selection handles to be displayed after they have been temporarily
+  /// prevented by [preventSelectionHandles].
+  void preventSelectionHandles() => _areSelectionHandlesAllowed.value = false;
+
+  /// Reports the [HandleType] of the handle being dragged by the user.
+  ///
+  /// If no drag handle is being dragged, this value is `null`.
+  final ValueNotifier<HandleType?> handleBeingDragged = ValueNotifier<HandleType?>(null);
+
   /// Controls the iOS floating cursor.
   late final FloatingCursorController floatingCursorController;
 
@@ -580,14 +599,6 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
       ..hideMagnifier()
       ..blinkCaret();
 
-    final selection = widget.selection.value;
-    if (selection != null &&
-        !selection.isCollapsed &&
-        (_isOverBaseHandle(details.localPosition) || _isOverExtentHandle(details.localPosition))) {
-      _controlsController!.toggleToolbar();
-      return;
-    }
-
     editorGesturesLog.info("Tap down on document");
     final docOffset = _interactorOffsetToDocumentOffset(details.localPosition);
     editorGesturesLog.fine(" - document offset: $docOffset");
@@ -607,6 +618,14 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
           return;
         }
       }
+    }
+
+    final selection = widget.selection.value;
+    if (selection != null &&
+        !selection.isCollapsed &&
+        (_isOverBaseHandle(details.localPosition) || _isOverExtentHandle(details.localPosition))) {
+      _controlsController!.toggleToolbar();
+      return;
     }
 
     final docPosition = _docLayout.getDocumentPositionNearestToOffset(docOffset);
@@ -713,13 +732,6 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _onDoubleTapUp(TapUpDetails details) {
-    final selection = widget.selection.value;
-    if (selection != null &&
-        !selection.isCollapsed &&
-        (_isOverBaseHandle(details.localPosition) || _isOverExtentHandle(details.localPosition))) {
-      return;
-    }
-
     editorGesturesLog.info("Double tap down on document");
     final docOffset = _interactorOffsetToDocumentOffset(details.localPosition);
     editorGesturesLog.fine(" - document offset: $docOffset");
@@ -739,6 +751,13 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
           return;
         }
       }
+    }
+
+    final selection = widget.selection.value;
+    if (selection != null &&
+        !selection.isCollapsed &&
+        (_isOverBaseHandle(details.localPosition) || _isOverExtentHandle(details.localPosition))) {
+      return;
     }
 
     final docPosition = _docLayout.getDocumentPositionNearestToOffset(docOffset);
@@ -871,6 +890,24 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     _globalTapDownOffset = null;
     _tapDownLongPressTimer?.cancel();
 
+    if (widget.contentTapHandlers != null) {
+      final docOffset = _interactorOffsetToDocumentOffset(details.localPosition);
+      for (final handler in widget.contentTapHandlers!) {
+        final result = handler.onPanStart(
+          DocumentTapDetails(
+            documentLayout: _docLayout,
+            layoutOffset: docOffset,
+            globalOffset: details.globalPosition,
+          ),
+        );
+        if (result == TapHandlingInstruction.halt) {
+          // The custom tap handler doesn't want us to react at all
+          // to the tap.
+          return;
+        }
+      }
+    }
+
     // TODO: to help the user drag handles instead of scrolling, try checking touch
     //       placement during onTapDown, and then pick that up here. I think the little
     //       bit of slop might be the problem.
@@ -957,6 +994,24 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
+    if (widget.contentTapHandlers != null) {
+      final docOffset = _interactorOffsetToDocumentOffset(details.localPosition);
+      for (final handler in widget.contentTapHandlers!) {
+        final result = handler.onPanUpdate(
+          DocumentTapDetails(
+            documentLayout: _docLayout,
+            layoutOffset: docOffset,
+            globalOffset: details.globalPosition,
+          ),
+        );
+        if (result == TapHandlingInstruction.halt) {
+          // The custom tap handler doesn't want us to react at all
+          // to the tap.
+          return;
+        }
+      }
+    }
+
     _globalDragOffset = details.globalPosition;
 
     _dragEndInInteractor = interactorBox.globalToLocal(details.globalPosition);
@@ -1003,6 +1058,7 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
         const ClearComposingRegionRequest(),
       ]);
     } else if (_dragHandleType == HandleType.upstream) {
+      _controlsController!.handleBeingDragged.value = HandleType.upstream;
       widget.editor.execute([
         ChangeSelectionRequest(
           widget.selection.value!.copyWith(
@@ -1014,6 +1070,7 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
         const ClearComposingRegionRequest(),
       ]);
     } else if (_dragHandleType == HandleType.downstream) {
+      _controlsController!.handleBeingDragged.value = HandleType.downstream;
       widget.editor.execute([
         ChangeSelectionRequest(
           widget.selection.value!.copyWith(
@@ -1028,9 +1085,28 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _onPanEnd(DragEndDetails details) {
+    if (widget.contentTapHandlers != null) {
+      final docOffset = _interactorOffsetToDocumentOffset(details.localPosition);
+      for (final handler in widget.contentTapHandlers!) {
+        final result = handler.onPanEnd(
+          DocumentTapDetails(
+            documentLayout: _docLayout,
+            layoutOffset: docOffset,
+            globalOffset: details.globalPosition,
+          ),
+        );
+        if (result == TapHandlingInstruction.halt) {
+          // The custom tap handler doesn't want us to react at all
+          // to the tap.
+          return;
+        }
+      }
+    }
+
     _controlsController!
       ..hideMagnifier()
-      ..blinkCaret();
+      ..blinkCaret()
+      ..handleBeingDragged.value = null;
 
     if (_dragMode != null) {
       // The user was dragging a selection change in some way, either with handles
@@ -1040,9 +1116,21 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _onPanCancel() {
+    if (widget.contentTapHandlers != null) {
+      for (final handler in widget.contentTapHandlers!) {
+        final result = handler.onPanCancel();
+        if (result == TapHandlingInstruction.halt) {
+          // The custom tap handler doesn't want us to react at all
+          // to the tap.
+          return;
+        }
+      }
+    }
+
     if (_dragMode != null) {
       _onDragSelectionEnd();
     }
+    _controlsController!.handleBeingDragged.value = null;
   }
 
   void _onDragSelectionEnd() {
@@ -1506,23 +1594,25 @@ class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMag
     // When the user is dragging an overlay handle, SuperEditor
     // position a Leader with a LeaderLink. This magnifier follows that Leader
     // via the LeaderLink.
-    return ValueListenableBuilder(
-      valueListenable: _controlsController!.shouldShowMagnifier,
-      builder: (context, shouldShowMagnifier, child) {
-        return _controlsController!.magnifierBuilder != null //
-            ? _controlsController!.magnifierBuilder!(
-                context,
-                DocumentKeys.magnifier,
-                _controlsController!.magnifierFocalPoint,
-                shouldShowMagnifier,
-              )
-            : _buildDefaultMagnifier(
-                context,
-                DocumentKeys.magnifier,
-                _controlsController!.magnifierFocalPoint,
-                shouldShowMagnifier,
-              );
-      },
+    return IgnorePointer(
+      child: ValueListenableBuilder(
+        valueListenable: _controlsController!.shouldShowMagnifier,
+        builder: (context, shouldShowMagnifier, child) {
+          return _controlsController!.magnifierBuilder != null //
+              ? _controlsController!.magnifierBuilder!(
+                  context,
+                  DocumentKeys.magnifier,
+                  _controlsController!.magnifierFocalPoint,
+                  shouldShowMagnifier,
+                )
+              : _buildDefaultMagnifier(
+                  context,
+                  DocumentKeys.magnifier,
+                  _controlsController!.magnifierFocalPoint,
+                  shouldShowMagnifier,
+                );
+        },
+      ),
     );
   }
 
@@ -1537,10 +1627,10 @@ class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMag
       magnifierKey: magnifierKey,
       leaderLink: magnifierFocalPoint,
       show: isVisible,
-      // The bottom of the magnifier sits above the focal point.
-      // Leave a few pixels between the bottom of the magnifier and the focal point. This
-      // value was chosen empirically.
-      offsetFromFocalPoint: const Offset(0, -20),
+      // The magnifier is centered with the focal point. Translate it so that it sits
+      // above the focal point and leave a few pixels between the bottom of the magnifier
+      // and the focal point. This value was chosen empirically.
+      offsetFromFocalPoint: Offset(0, (-defaultIosMagnifierSize.height / 2) - 20),
       handleColor: _controlsController!.handleColor,
     );
   }
@@ -1889,6 +1979,8 @@ class SuperEditorIosHandlesDocumentLayerBuilder implements SuperEditorLayerBuild
       return const ContentLayerProxyWidget(child: SizedBox());
     }
 
+    final controlsController = SuperEditorIosControlsScope.rootOf(context);
+
     return IosHandlesDocumentLayer(
       document: editContext.document,
       documentLayout: editContext.documentLayout,
@@ -1899,13 +1991,13 @@ class SuperEditorIosHandlesDocumentLayerBuilder implements SuperEditorLayerBuild
           const ClearComposingRegionRequest(),
         ]);
       },
-      handleColor: handleColor ??
-          SuperEditorIosControlsScope.maybeRootOf(context)?.handleColor ??
-          Theme.of(context).primaryColor,
+      areSelectionHandlesAllowed: controlsController.areSelectionHandlesAllowed,
+      handleBeingDragged: controlsController.handleBeingDragged,
+      handleColor: handleColor ?? controlsController.handleColor ?? Theme.of(context).primaryColor,
       caretWidth: caretWidth ?? 2,
       handleBallDiameter: handleBallDiameter ?? defaultIosHandleBallDiameter,
-      shouldCaretBlink: SuperEditorIosControlsScope.rootOf(context).shouldCaretBlink,
-      floatingCursorController: SuperEditorIosControlsScope.rootOf(context).floatingCursorController,
+      shouldCaretBlink: controlsController.shouldCaretBlink,
+      floatingCursorController: controlsController.floatingCursorController,
     );
   }
 }

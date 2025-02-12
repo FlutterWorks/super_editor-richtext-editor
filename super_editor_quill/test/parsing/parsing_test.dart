@@ -3,43 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor_quill/super_editor_quill.dart';
 
-import 'test_documents.dart';
+import '../test_documents.dart';
 
 // Useful links:
-//  - create a Delta document in the browser: https://quilljs.com/docs/delta
+//  - create a Delta document in the browser: https://quilljs.com/playground/snow
 //  - list of supported formats (bold, italics, header, etc): https://quilljs.com/docs/formats
 
 void main() {
   group("Delta document parsing >", () {
     group("text >", () {
-      test("newlines", () {
-        final document = parseQuillDeltaDocument(
-          {
-            "ops": [
-              {"insert": "\nLine one\nLine two\nLine three\nLine four\n\n"}
-            ],
-          },
-        );
-
-        expect((document.getNodeAt(0)! as TextNode).text.text, "");
-        expect((document.getNodeAt(1)! as TextNode).text.text, "Line one");
-        expect((document.getNodeAt(2)! as TextNode).text.text, "Line two");
-        expect((document.getNodeAt(3)! as TextNode).text.text, "Line three");
-        expect((document.getNodeAt(4)! as TextNode).text.text, "Line four");
-        expect((document.getNodeAt(5)! as TextNode).text.text, "");
-        expect((document.getNodeAt(6)! as TextNode).text.text, "");
-
-        // A note on the length of the document. If this document is placed in a
-        // Quill editor, there will only be 6 lines the user can edit. This seems
-        // like it's probably a part of Quill specified behavior. I think that
-        // because every Quill document must always end with a newline, the final
-        // newline of a document is ignored by a Quill editor. But in our case
-        // we parse every newline, including the trailing newline, so the length
-        // of this document is 7. If that's a problem, we can make the parser
-        // more intelligent about this later.
-        expect(document.nodeCount, 7);
-      });
-
       test("plain text followed by block format", () {
         final document = parseQuillDeltaDocument(
           {
@@ -54,53 +26,17 @@ void main() {
         );
 
         expect(
-          (document.getNodeAt(0)! as ParagraphNode).text.text,
+          (document.getNodeAt(0)! as ParagraphNode).text.toPlainText(),
           "This is regular text",
         );
         expect((document.getNodeAt(0)! as ParagraphNode).getMetadataValue("blockType"), paragraphAttribution);
         expect(
-          (document.getNodeAt(1)! as ParagraphNode).text.text,
+          (document.getNodeAt(1)! as ParagraphNode).text.toPlainText(),
           "This is a code block",
         );
         expect((document.getNodeAt(1)! as ParagraphNode).getMetadataValue("blockType"), codeAttribution);
-        expect((document.getNodeAt(2)! as ParagraphNode).text.text, "");
+        expect((document.getNodeAt(2)! as ParagraphNode).text.toPlainText(), "");
         expect(document.nodeCount, 3);
-      });
-
-      test("multiline code block", () {
-        // Notice that Delta encodes each line of a code block as a separate attributed
-        // delta. But when a Quill editor renders the code block, it's rendered as one
-        // block. This test ensures that Super Editor accumulates back-to-back code
-        // lines into a single code node.
-        final document = parseQuillDeltaDocument(
-          {
-            "ops": [
-              {"insert": "This is a code block"},
-              {
-                "attributes": {"code-block": "plain"},
-                "insert": "\n"
-              },
-              {"insert": "This is line two"},
-              {
-                "attributes": {"code-block": "plain"},
-                "insert": "\n"
-              },
-              {"insert": "This is line three"},
-              {
-                "attributes": {"code-block": "plain"},
-                "insert": "\n"
-              },
-            ],
-          },
-        );
-
-        expect(
-          (document.getNodeAt(0)! as ParagraphNode).text.text,
-          "This is a code block\nThis is line two\nThis is line three",
-        );
-        expect((document.getNodeAt(0)! as ParagraphNode).getMetadataValue("blockType"), codeAttribution);
-        expect((document.getNodeAt(1)! as ParagraphNode).text.text, "");
-        expect(document.nodeCount, 2);
       });
 
       test("all text blocks and styles", () {
@@ -111,14 +47,14 @@ void main() {
 
         // Check the header.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "All Text Styles");
+        expect((node as TextNode).text.toPlainText(), "All Text Styles");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Check the paragraph with various formatting.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text,
+        expect((node as TextNode).text.toPlainText(),
             "Samples of styles: bold, italics, underline, strikethrough, text color, background color, font change, link");
         expect(
           node.text.getAttributionSpansByFilter((a) => true),
@@ -139,14 +75,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Paragraph - left aligned.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Left aligned");
+        expect((node as TextNode).text.toPlainText(), "Left aligned");
         expect(node.metadata["textAlign"], isNull);
 
         nodes.moveNext();
@@ -154,7 +90,7 @@ void main() {
 
         // Paragraph - center aligned.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Center aligned");
+        expect((node as TextNode).text.toPlainText(), "Center aligned");
         expect(node.metadata["textAlign"], "center");
 
         nodes.moveNext();
@@ -162,7 +98,7 @@ void main() {
 
         // Paragraph - right aligned.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Right aligned");
+        expect((node as TextNode).text.toPlainText(), "Right aligned");
         expect(node.metadata["textAlign"], "right");
 
         nodes.moveNext();
@@ -170,7 +106,7 @@ void main() {
 
         // Paragraph - justified.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Justified");
+        expect((node as TextNode).text.toPlainText(), "Justified");
         expect(node.metadata["textAlign"], "justify");
 
         nodes.moveNext();
@@ -178,14 +114,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Ordered list items.
         expect(node, isA<ListItemNode>());
-        expect((node as ListItemNode).text.text, "Ordered item 1");
+        expect((node as ListItemNode).text.toPlainText(), "Ordered item 1");
         expect(node.type, ListItemType.ordered);
         expect(node.indent, 0);
 
@@ -193,7 +129,7 @@ void main() {
         node = nodes.current;
 
         expect(node, isA<ListItemNode>());
-        expect((node as ListItemNode).text.text, "Ordered item 2");
+        expect((node as ListItemNode).text.toPlainText(), "Ordered item 2");
         expect(node.type, ListItemType.ordered);
         expect(node.indent, 0);
 
@@ -202,14 +138,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Unordered list items.
         expect(node, isA<ListItemNode>());
-        expect((node as ListItemNode).text.text, "Unordered item 1");
+        expect((node as ListItemNode).text.toPlainText(), "Unordered item 1");
         expect(node.type, ListItemType.unordered);
         expect(node.indent, 0);
 
@@ -217,7 +153,7 @@ void main() {
         node = nodes.current;
 
         expect(node, isA<ListItemNode>());
-        expect((node as ListItemNode).text.text, "Unordered item 2");
+        expect((node as ListItemNode).text.toPlainText(), "Unordered item 2");
         expect(node.type, ListItemType.unordered);
         expect(node.indent, 0);
 
@@ -226,21 +162,21 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Tasks.
         expect(node, isA<TaskNode>());
-        expect((node as TaskNode).text.text, "I'm a task that's incomplete");
+        expect((node as TaskNode).text.toPlainText(), "I'm a task that's incomplete");
         expect(node.isComplete, isFalse);
 
         nodes.moveNext();
         node = nodes.current;
 
         expect(node, isA<TaskNode>());
-        expect((node as TaskNode).text.text, "I'm a task that's complete");
+        expect((node as TaskNode).text.toPlainText(), "I'm a task that's complete");
         expect(node.isComplete, isTrue);
 
         nodes.moveNext();
@@ -248,21 +184,21 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Indented paragraphs.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "I'm an indented paragraph at level 1");
+        expect((node as TextNode).text.toPlainText(), "I'm an indented paragraph at level 1");
         expect((node as ParagraphNode).indent, 1);
 
         nodes.moveNext();
         node = nodes.current;
 
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "I'm a paragraph indented at level 2");
+        expect((node as TextNode).text.toPlainText(), "I'm a paragraph indented at level 2");
         expect((node as ParagraphNode).indent, 2);
 
         nodes.moveNext();
@@ -270,14 +206,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Superscript and subscript.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Some contentThis is a subscript");
+        expect((node as TextNode).text.toPlainText(), "Some contentThis is a subscript");
         expect(
           node.text.getAttributionSpansByFilter((a) => true),
           {
@@ -289,7 +225,7 @@ void main() {
         node = nodes.current;
 
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Some contentThis is a superscript");
+        expect((node as TextNode).text.toPlainText(), "Some contentThis is a superscript");
         expect(
           node.text.getAttributionSpansByFilter((a) => true),
           {
@@ -302,14 +238,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Text sizes.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "HUGE");
+        expect((node as TextNode).text.toPlainText(), "HUGE");
         expect(
           node.text.getAttributionSpansByFilter((a) => true),
           {
@@ -321,7 +257,7 @@ void main() {
         node = nodes.current;
 
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "Large");
+        expect((node as TextNode).text.toPlainText(), "Large");
         expect(
           node.text.getAttributionSpansByFilter((a) => true),
           {
@@ -333,7 +269,7 @@ void main() {
         node = nodes.current;
 
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "small");
+        expect((node as TextNode).text.toPlainText(), "small");
         expect(
           node.text.getAttributionSpansByFilter((a) => true),
           {
@@ -346,14 +282,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Blockquote.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "This is a blockquote");
+        expect((node as TextNode).text.toPlainText(), "This is a blockquote");
         expect(node.metadata["blockType"], blockquoteAttribution);
 
         nodes.moveNext();
@@ -361,14 +297,14 @@ void main() {
 
         // Blank line.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         nodes.moveNext();
         node = nodes.current;
 
         // Code block - with multiple lines.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "This is a code block\nThat spans two lines.");
+        expect((node as TextNode).text.toPlainText(), "This is a code block\nThat spans two lines.");
         expect(node.metadata["blockType"], codeAttribution);
 
         nodes.moveNext();
@@ -376,7 +312,7 @@ void main() {
 
         // Final newline node.
         expect(node, isA<ParagraphNode>());
-        expect((node as TextNode).text.text, "");
+        expect((node as TextNode).text.toPlainText(), "");
 
         // No more nodes.
         expect(nodes.moveNext(), isFalse);
@@ -413,7 +349,7 @@ void main() {
         );
 
         final paragraph = document.first as ParagraphNode;
-        expect(paragraph.text.text, "This paragraph has some overlapping styles.");
+        expect(paragraph.text.toPlainText(), "This paragraph has some overlapping styles.");
         expect(
           paragraph.text.getAttributionSpansByFilter((a) => true),
           {
@@ -438,17 +374,17 @@ void main() {
         expect(document.nodeCount, 3);
 
         expect(document.getNodeAt(0)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(0)! as ParagraphNode).text.text, "Paragraph one");
+        expect((document.getNodeAt(0)! as ParagraphNode).text.toPlainText(), "Paragraph one");
         expect(
           (document.getNodeAt(0)! as ParagraphNode).text.getAttributionSpansByFilter((a) => true),
           const <AttributionSpan>{},
         );
 
         expect(document.getNodeAt(1)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(1)! as ParagraphNode).text.text, "Paragraph two");
+        expect((document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "Paragraph two");
 
         expect(document.getNodeAt(2)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(2)! as ParagraphNode).text.text, "");
+        expect((document.getNodeAt(2)! as ParagraphNode).text.toPlainText(), "");
       });
 
       test("gracefully handles unknown text block format", () {
@@ -464,7 +400,7 @@ void main() {
         expect(document.nodeCount, 3);
 
         expect(document.getNodeAt(0)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(0)! as ParagraphNode).text.text, "Paragraph one");
+        expect((document.getNodeAt(0)! as ParagraphNode).text.toPlainText(), "Paragraph one");
         expect((document.getNodeAt(0)! as ParagraphNode).metadata["blockType"], paragraphAttribution);
         expect(
           (document.getNodeAt(0)! as ParagraphNode).text.getAttributionSpansByFilter((a) => true),
@@ -472,10 +408,10 @@ void main() {
         );
 
         expect(document.getNodeAt(1)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(1)! as ParagraphNode).text.text, "Paragraph two");
+        expect((document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "Paragraph two");
 
         expect(document.getNodeAt(2)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(2)! as ParagraphNode).text.text, "");
+        expect((document.getNodeAt(2)! as ParagraphNode).text.toPlainText(), "");
       });
     });
 
@@ -583,13 +519,13 @@ void main() {
         expect(document.nodeCount, 3);
 
         expect(document.getNodeAt(0)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(0)! as ParagraphNode).text.text, "Paragraph one");
+        expect((document.getNodeAt(0)! as ParagraphNode).text.toPlainText(), "Paragraph one");
 
         expect(document.getNodeAt(1)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(1)! as ParagraphNode).text.text, "Paragraph two");
+        expect((document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "Paragraph two");
 
         expect(document.getNodeAt(2)!, isA<ParagraphNode>());
-        expect((document.getNodeAt(2)! as ParagraphNode).text.text, "");
+        expect((document.getNodeAt(2)! as ParagraphNode).text.toPlainText(), "");
       });
     });
 
@@ -701,7 +637,7 @@ void main() {
         ]);
 
         final text = (document.first as ParagraphNode).text;
-        expect(text.text, "Have you heard about inline embeds, @John Smith?");
+        expect(text.toPlainText(), "Have you heard about inline embeds, @John Smith?");
         expect(
           text.spans,
           AttributedSpans(
@@ -734,12 +670,12 @@ void main() {
         );
 
         expect(
-          (document.getNodeAt(0)! as ParagraphNode).text.text,
+          (document.getNodeAt(0)! as ParagraphNode).text.toPlainText(),
           "This is regular text",
         );
         expect((document.getNodeAt(0)! as ParagraphNode).getMetadataValue("blockType"), paragraphAttribution);
         expect(
-          (document.getNodeAt(1)! as ParagraphNode).text.text,
+          (document.getNodeAt(1)! as ParagraphNode).text.toPlainText(),
           "This is a banner",
         );
         expect(

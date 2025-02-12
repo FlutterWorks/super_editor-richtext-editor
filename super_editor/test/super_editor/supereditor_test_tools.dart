@@ -69,6 +69,13 @@ class TestDocumentSelector {
     );
   }
 
+  TestSuperEditorConfigurator withSingleShortParagraph() {
+    return TestSuperEditorConfigurator._(
+      _widgetTester,
+      singleParagraphDocShortText(),
+    );
+  }
+
   TestSuperEditorConfigurator withSingleParagraphAndLink() {
     return TestSuperEditorConfigurator._(
       _widgetTester,
@@ -676,6 +683,7 @@ class _TestSuperEditorState extends State<_TestSuperEditor> {
       componentBuilders: [
         ...widget.testConfiguration.addedComponents,
         ...(widget.testConfiguration.componentBuilders ?? defaultComponentBuilders),
+        if (widget.testConfiguration.componentBuilders == null) TaskComponentBuilder(widget.testDocumentContext.editor)
       ],
       scrollController: widget.testConfiguration.scrollController,
       documentOverlayBuilders: _createOverlayBuilders(),

@@ -823,7 +823,7 @@ class CommonEditorOperations {
     DocumentNode prevNode = startingNode;
     DocumentNode? selectableNode;
     do {
-      selectableNode = document.getNodeBefore(prevNode);
+      selectableNode = document.getNodeBeforeById(prevNode.id);
 
       if (selectableNode != null) {
         final nextComponent = documentLayoutResolver().getComponentByNodeId(selectableNode.id);
@@ -844,7 +844,7 @@ class CommonEditorOperations {
     DocumentNode prevNode = startingNode;
     DocumentNode? selectableNode;
     do {
-      selectableNode = document.getNodeAfter(prevNode);
+      selectableNode = document.getNodeAfterById(prevNode.id);
 
       if (selectableNode != null) {
         final nextComponent = documentLayoutResolver().getComponentByNodeId(selectableNode.id);
@@ -911,7 +911,7 @@ class CommonEditorOperations {
       final text = (document.getNodeById(composer.selection!.extent.nodeId) as TextNode).text;
       if (textPosition.offset == text.length) {
         final node = document.getNodeById(composer.selection!.extent.nodeId)!;
-        final nodeAfter = document.getNodeAfter(node);
+        final nodeAfter = document.getNodeAfterById(node.id);
 
         if (nodeAfter is TextNode) {
           // The caret is at the end of one TextNode and is followed by
@@ -954,7 +954,7 @@ class CommonEditorOperations {
       return false;
     }
 
-    final nodeAfter = document.getNodeAfter(node);
+    final nodeAfter = document.getNodeAfterById(node.id);
     if (nodeAfter == null) {
       return false;
     }
@@ -984,9 +984,9 @@ class CommonEditorOperations {
       return false;
     }
 
-    DocumentNode? nodeAfter = document.getNodeAfter(node);
+    DocumentNode? nodeAfter = document.getNodeAfterById(node.id);
     while (nodeAfter is BlockNode && !nodeAfter.isDeletable) {
-      nodeAfter = document.getNodeAfter(nodeAfter);
+      nodeAfter = document.getNodeAfterById(nodeAfter.id);
     }
 
     if (nodeAfter == null) {
@@ -1104,7 +1104,7 @@ class CommonEditorOperations {
         //  * If the node above is an empty paragraph, delete it.
         //  * If the node above is non-selectable, delete it.
         //  * Otherwise, move the caret up to the node above.
-        final nodeBefore = document.getNodeBefore(node);
+        final nodeBefore = document.getNodeBeforeById(node.id);
         if (nodeBefore == null) {
           return false;
         }
@@ -1131,7 +1131,7 @@ class CommonEditorOperations {
     if (composer.selection!.extent.nodePosition is TextNodePosition) {
       final textPosition = composer.selection!.extent.nodePosition as TextNodePosition;
       if (textPosition.offset == 0) {
-        final nodeBefore = document.getNodeBefore(node);
+        final nodeBefore = document.getNodeBeforeById(node.id);
         if (nodeBefore == null) {
           return false;
         }
@@ -1183,7 +1183,7 @@ class CommonEditorOperations {
       return false;
     }
 
-    final nodeBefore = document.getNodeBefore(node);
+    final nodeBefore = document.getNodeBeforeById(node.id);
     if (nodeBefore == null) {
       return false;
     }
@@ -1218,7 +1218,7 @@ class CommonEditorOperations {
       return false;
     }
 
-    DocumentNode? nodeBefore = document.getNodeBefore(node);
+    DocumentNode? nodeBefore = document.getNodeBeforeById(node.id);
     while (nodeBefore != null) {
       final component = documentLayoutResolver().getComponentByNodeId(nodeBefore.id);
       if (component == null) {
@@ -1243,7 +1243,7 @@ class CommonEditorOperations {
         return true;
       }
 
-      nodeBefore = document.getNodeBefore(nodeBefore);
+      nodeBefore = document.getNodeBeforeById(nodeBefore.id);
     }
 
     // We didn't find any selectable nodes before the current node.
@@ -1260,9 +1260,9 @@ class CommonEditorOperations {
       return false;
     }
 
-    DocumentNode? nodeAbove = document.getNodeBefore(node);
+    DocumentNode? nodeAbove = document.getNodeBeforeById(node.id);
     while (nodeAbove != null && nodeAbove is BlockNode && !nodeAbove.isDeletable) {
-      nodeAbove = document.getNodeBefore(nodeAbove);
+      nodeAbove = document.getNodeBeforeById(nodeAbove.id);
     }
 
     if (nodeAbove == null) {
@@ -1637,6 +1637,7 @@ class CommonEditorOperations {
   /// Returns `true` if the [text] was successfully inserted, or [false]
   /// if it wasn't, e.g., there was no selection, or more than one node
   /// was selected.
+  @Deprecated("Execute a relevant EditRequest in an Editor, e.g., InsertPlainTextAtCaretRequest.")
   bool insertPlainText(String text) {
     editorOpsLog.fine('Attempting to insert "$text" at document selection: ${composer.selection}');
     if (composer.selection == null) {
@@ -1718,7 +1719,7 @@ class CommonEditorOperations {
     final extentNodePosition = composer.selection!.extent.nodePosition;
     if (extentNodePosition is UpstreamDownstreamNodePosition) {
       editorOpsLog.fine("The selected position is an UpstreamDownstreamPosition. Inserting new paragraph first.");
-      insertBlockLevelNewline();
+      editor.execute([InsertNewlineAtCaretRequest()]);
     }
 
     final extentNode = document.getNodeById(composer.selection!.extent.nodeId)!;
@@ -1779,6 +1780,7 @@ class CommonEditorOperations {
   ///
   /// Returns `true` if a new node was inserted or a node was split into two.
   /// Returns `false` if there was no selection.
+  @Deprecated("Execute a relevant EditRequest in an Editor, e.g., InsertNewlineAtCaretRequest.")
   bool insertBlockLevelNewline() {
     editorOpsLog.fine("Inserting block-level newline");
     if (composer.selection == null) {
@@ -2398,9 +2400,7 @@ class PasteEditorCommand extends EditCommand {
     _parsedContent ??= _parseContent();
 
     // Assign locally so we don't have to use a "!" everywhere we reference it.
-    // Also, make a copy of the existing nodes so that when the document mutates,
-    // our local copy doesn't change.
-    final parsedContent = _parsedContent!.map((node) => node.copy()).toList();
+    final parsedContent = _parsedContent!.toList();
     if (parsedContent.isEmpty) {
       // No content to paste.
       return;
@@ -2447,10 +2447,11 @@ class PasteEditorCommand extends EditCommand {
 
     // The first line of pasted text was added to the selected paragraph.
     // Now, add all remaining pasted nodes to the document..
-    DocumentNode previousNode = currentNodeWithSelection;
+    DocumentNode previousNode = document.getNodeById(_pastePosition.nodeId)!;
+    // ^ re-query the node where the first paragraph was pasted because nodes are immutable.
     for (final pastedNode in parsedContent.sublist(1)) {
       document.insertNodeAfter(
-        existingNode: previousNode,
+        existingNodeId: previousNode.id,
         newNode: pastedNode,
       );
       previousNode = pastedNode;
@@ -2463,12 +2464,15 @@ class PasteEditorCommand extends EditCommand {
     }
 
     // Place the caret at the end of the pasted content.
+    final pastedNode = document.getNodeById(previousNode.id)!;
+    // ^ re-query the node where we pasted content because nodes are immutable.
+
     executor.executeCommand(
       ChangeSelectionCommand(
         DocumentSelection.collapsed(
           position: DocumentPosition(
-            nodeId: previousNode.id,
-            nodePosition: previousNode.endPosition,
+            nodeId: pastedNode.id,
+            nodePosition: pastedNode.endPosition,
           ),
         ),
         SelectionChangeType.insertContent,
@@ -2504,7 +2508,7 @@ class PasteEditorCommand extends EditCommand {
       attributedLines.add(
         AttributedText(
           line,
-          _findUrlSpansInText(pastedText: lines.first),
+          _findUrlSpansInText(pastedText: line),
         ),
       );
     }
@@ -2521,39 +2525,24 @@ class PasteEditorCommand extends EditCommand {
     for (final wordBoundary in wordBoundaries) {
       final word = wordBoundary.textInside(pastedText);
 
-      final extractedLinks = linkify(
-        word,
-        options: const LinkifyOptions(
-          humanize: false,
-          looseUrl: true,
-        ),
-      );
-
-      final int linkCount = extractedLinks.fold(0, (value, element) => element is UrlElement ? value + 1 : value);
-      if (linkCount == 1) {
-        // The word is a single URL. Linkify it.
-        late final Uri uri;
-        try {
-          uri = parseLink(word);
-        } catch (exception) {
-          // Something went wrong when trying to parse links. This can happen, for example,
-          // due to Markdown syntax around a link, e.g., [My Link](www.something.com). I'm
-          // not sure why that case throws, but it does. We ignore any URL that throws.
-          continue;
-        }
-
-        final startOffset = wordBoundary.start;
-        // -1 because TextPosition's offset indexes the character after the
-        // selection, not the final character in the selection.
-        final endOffset = wordBoundary.end - 1;
-
-        // Add link attribution.
-        linkAttributionSpans.addAttribution(
-          newAttribution: LinkAttribution.fromUri(uri),
-          start: startOffset,
-          end: endOffset,
-        );
+      // The word is a single URL. Linkify it.
+      final uri = tryToParseUrl(word);
+      if (uri == null) {
+        // This word isn't a URI.
+        continue;
       }
+
+      final startOffset = wordBoundary.start;
+      // -1 because TextPosition's offset indexes the character after the
+      // selection, not the final character in the selection.
+      final endOffset = wordBoundary.end - 1;
+
+      // Add link attribution.
+      linkAttributionSpans.addAttribution(
+        newAttribution: LinkAttribution.fromUri(uri),
+        start: startOffset,
+        end: endOffset,
+      );
     }
 
     return linkAttributionSpans;

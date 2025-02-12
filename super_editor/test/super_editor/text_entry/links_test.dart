@@ -44,13 +44,14 @@ void main() {
 
         expect(text.toPlainText(), "https://www.google.com ");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(0, text.length - 2),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 0,
+              end: text.length - 2,
+            ),
+          },
         );
       });
 
@@ -87,13 +88,14 @@ void main() {
 
         expect(text.toPlainText(), "https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty paragraph.
@@ -137,13 +139,14 @@ void main() {
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the paragraph.
@@ -152,8 +155,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "after link");
       });
 
-      testWidgetsOnAndroid(
-          'when pressing the newline button on the software keyboard at the end of a paragraph (on Android)',
+      testWidgetsOnAndroid('when pressing the newline button on the software keyboard at the end of a paragraph',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -188,13 +190,14 @@ void main() {
 
         expect(text.toPlainText(), "https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty paragraph.
@@ -203,8 +206,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "");
       });
 
-      testWidgetsOnAndroid(
-          'when pressing the newline button on the software keyboard at the middle of a paragraph (on Android)',
+      testWidgetsOnAndroid('when pressing the newline button on the software keyboard at the middle of a paragraph',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -241,13 +243,14 @@ void main() {
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the paragraph.
@@ -256,7 +259,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "after link");
       });
 
-      testWidgetsOnIos('when pressing the newline button on the software keyboard at the end of a paragraph (on iOS)',
+      testWidgetsOnIos('when pressing the newline button on the software keyboard at the end of a paragraph',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -292,13 +295,14 @@ void main() {
 
         expect(text.toPlainText(), "https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty line.
@@ -307,8 +311,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ParagraphNode).text.toPlainText(), "");
       });
 
-      testWidgetsOnIos(
-          'when pressing the newline button on the software keyboard at the middle of a paragraph (on iOS)',
+      testWidgetsOnIos('when pressing the newline button on the software keyboard at the middle of a paragraph',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -346,13 +349,14 @@ void main() {
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the paragraph.
@@ -396,13 +400,14 @@ void main() {
 
         expect(text.toPlainText(), "Item https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(5, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 5,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty list item.
@@ -446,13 +451,14 @@ void main() {
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the list item.
@@ -461,8 +467,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ListItemNode).text.toPlainText(), "after link");
       });
 
-      testWidgetsOnAndroid(
-          'when pressing the newline button on the software keyboard at the end of a list item (on Android)',
+      testWidgetsOnAndroid('when pressing the newline button on the software keyboard at the end of a list item',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -499,13 +504,14 @@ void main() {
 
         expect(text.toPlainText(), "Item https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(5, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 5,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty list item.
@@ -514,8 +520,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ListItemNode).text.toPlainText(), "");
       });
 
-      testWidgetsOnAndroid(
-          'when pressing the newline button on the software keyboard at the middle of a list item (on Android)',
+      testWidgetsOnAndroid('when pressing the newline button on the software keyboard at the middle of a list item',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -552,13 +557,14 @@ void main() {
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the list item.
@@ -567,7 +573,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ListItemNode).text.toPlainText(), "after link");
       });
 
-      testWidgetsOnIos('when pressing the newline button on the software keyboard at the end of a list item (on iOS)',
+      testWidgetsOnIos('when pressing the newline button on the software keyboard at the end of a list item',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -605,13 +611,14 @@ void main() {
 
         expect(text.toPlainText(), "Item https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(5, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 5,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty list item.
@@ -620,8 +627,7 @@ void main() {
         expect((textContext.document.getNodeAt(1)! as ListItemNode).text.toPlainText(), "");
       });
 
-      testWidgetsOnIos(
-          'when pressing the newline button on the software keyboard at the middle of a list item (on iOS)',
+      testWidgetsOnIos('when pressing the newline button on the software keyboard at the middle of a list item',
           (tester) async {
         final textContext = await tester //
             .createDocument()
@@ -659,13 +665,14 @@ void main() {
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the list item.
@@ -682,7 +689,6 @@ void main() {
         );
         final composer = MutableDocumentComposer();
         final editor = createDefaultDocumentEditor(document: document, composer: composer);
-        final task = document.getNodeAt(0) as TaskNode;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -704,7 +710,7 @@ void main() {
         await tester.typeImeText("https://www.google.com");
 
         // Ensure it's not linkified yet.
-        var text = task.text;
+        var text = document.first.asTask.text;
 
         expect(text.toPlainText(), "This is a task https://www.google.com");
         expect(
@@ -719,17 +725,18 @@ void main() {
         await tester.pressEnter();
 
         // Ensure it's linkified.
-        text = task.text;
+        text = document.first.asTask.text;
 
         expect(text.toPlainText(), "This is a task https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(15, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 15,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty task.
@@ -746,7 +753,6 @@ void main() {
         );
         final composer = MutableDocumentComposer();
         final editor = createDefaultDocumentEditor(document: document, composer: composer);
-        final task = document.getNodeAt(0) as TaskNode;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -768,7 +774,7 @@ void main() {
         await tester.typeImeText("https://www.google.com");
 
         // Ensure it's not linkified yet.
-        var text = task.text;
+        var text = document.first.asTask.text;
 
         expect(text.toPlainText(), "Before link https://www.google.comafter link");
         expect(
@@ -783,17 +789,18 @@ void main() {
         await tester.pressEnter();
 
         // Ensure it's linkified.
-        text = task.text;
+        text = document.first.asTask.text;
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the task
@@ -802,8 +809,7 @@ void main() {
         expect((document.getNodeAt(1)! as TaskNode).text.toPlainText(), "after link");
       });
 
-      testWidgetsOnAndroid(
-          'when pressing the newline button on the software keyboard at the end of a task (on Android)',
+      testWidgetsOnAndroid('when pressing the newline button on the software keyboard at the end of a task',
           (tester) async {
         final document = MutableDocument(
           nodes: [
@@ -812,7 +818,6 @@ void main() {
         );
         final composer = MutableDocumentComposer();
         final editor = createDefaultDocumentEditor(document: document, composer: composer);
-        final task = document.getNodeAt(0) as TaskNode;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -834,7 +839,7 @@ void main() {
         await tester.typeImeText("https://www.google.com");
 
         // Ensure it's not linkified yet.
-        var text = task.text;
+        var text = document.first.asTask.text;
 
         expect(text.toPlainText(), "This is a task https://www.google.com");
         expect(
@@ -850,17 +855,18 @@ void main() {
         await tester.typeImeText('\n');
 
         // Ensure it's linkified.
-        text = task.text;
+        text = document.first.asTask.text;
 
         expect(text.toPlainText(), "This is a task https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(15, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 15,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty task.
@@ -869,8 +875,7 @@ void main() {
         expect((document.getNodeAt(1)! as TaskNode).text.toPlainText(), "");
       });
 
-      testWidgetsOnAndroid(
-          'when pressing the newline button on the software keyboard at the middle of a task (on Android)',
+      testWidgetsOnAndroid('when pressing the newline button on the software keyboard at the middle of a task',
           (tester) async {
         final document = MutableDocument(
           nodes: [
@@ -879,7 +884,6 @@ void main() {
         );
         final composer = MutableDocumentComposer();
         final editor = createDefaultDocumentEditor(document: document, composer: composer);
-        final task = document.getNodeAt(0) as TaskNode;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -901,7 +905,7 @@ void main() {
         await tester.typeImeText("https://www.google.com");
 
         // Ensure it's not linkified yet.
-        var text = task.text;
+        var text = document.first.asTask.text;
 
         expect(text.toPlainText(), "Before link https://www.google.comafter link");
         expect(
@@ -917,17 +921,18 @@ void main() {
         await tester.typeImeText('\n');
 
         // Ensure it's linkified.
-        text = task.text;
+        text = document.first.asTask.text;
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the task.
@@ -936,7 +941,7 @@ void main() {
         expect((document.getNodeAt(1)! as TaskNode).text.toPlainText(), "after link");
       });
 
-      testWidgetsOnIos('when pressing the newline button on the software keyboard at the end of a task (on iOS)',
+      testWidgetsOnIos('when pressing the newline button on the software keyboard at the end of a task',
           (tester) async {
         final document = MutableDocument(
           nodes: [
@@ -945,7 +950,6 @@ void main() {
         );
         final composer = MutableDocumentComposer();
         final editor = createDefaultDocumentEditor(document: document, composer: composer);
-        final task = document.getNodeAt(0) as TaskNode;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -967,7 +971,7 @@ void main() {
         await tester.typeImeText("https://www.google.com");
 
         // Ensure it's not linkified yet.
-        var text = task.text;
+        var text = document.first.asTask.text;
 
         expect(text.toPlainText(), "This is a task https://www.google.com");
         expect(
@@ -984,17 +988,18 @@ void main() {
         await tester.pump();
 
         // Ensure it's linkified.
-        text = task.text;
+        text = document.first.asTask.text;
 
         expect(text.toPlainText(), "This is a task https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(15, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 15,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we added a new empty task.
@@ -1003,7 +1008,7 @@ void main() {
         expect((document.getNodeAt(1)! as TaskNode).text.toPlainText(), "");
       });
 
-      testWidgetsOnIos('when pressing the newline button on the software keyboard at the middle of a task (on iOS)',
+      testWidgetsOnIos('when pressing the newline button on the software keyboard at the middle of a task',
           (tester) async {
         final document = MutableDocument(
           nodes: [
@@ -1012,7 +1017,6 @@ void main() {
         );
         final composer = MutableDocumentComposer();
         final editor = createDefaultDocumentEditor(document: document, composer: composer);
-        final task = document.getNodeAt(0) as TaskNode;
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
@@ -1034,7 +1038,7 @@ void main() {
         await tester.typeImeText("https://www.google.com");
 
         // Ensure it's not linkified yet.
-        var text = task.text;
+        var text = document.first.asTask.text;
 
         expect(text.toPlainText(), "Before link https://www.google.comafter link");
         expect(
@@ -1051,17 +1055,18 @@ void main() {
         await tester.pump();
 
         // Ensure it's linkified.
-        text = task.text;
+        text = document.first.asTask.text;
 
         expect(text.toPlainText(), "Before link https://www.google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            },
-            range: SpanRange(12, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 12,
+              end: text.length - 1,
+            ),
+          },
         );
 
         // Ensure we split the task.
@@ -1071,81 +1076,315 @@ void main() {
       });
     });
 
-    testWidgetsOnAllPlatforms('inserts https scheme if it is missing', (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleEmptyParagraph()
-          .withInputSource(TextInputSource.ime)
-          .pump();
+    group('URL protocol >', () {
+      testWidgetsOnAllPlatforms('inserts https scheme if it is missing', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
 
-      // Place the caret at the beginning of the empty document.
-      await tester.placeCaretInParagraph("1", 0);
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
 
-      // Type a URL. It shouldn't linkify until we add a space.
-      await tester.typeImeText("www.google.com");
+        // Type a URL. It shouldn't linkify until we add a space.
+        await tester.typeImeText("www.google.com");
 
-      // Type a space, to cause a linkify reaction.
-      await tester.typeImeText(" ");
+        // Type a space, to cause a linkify reaction.
+        await tester.typeImeText(" ");
 
-      // Ensure it's linkified with a URL schema.
-      var text = SuperEditorInspector.findTextInComponent("1");
-      text = SuperEditorInspector.findTextInComponent("1");
+        // Ensure it's linkified with a URL schema.
+        var text = SuperEditorInspector.findTextInComponent("1");
 
-      expect(text.toPlainText(), "www.google.com ");
-      expect(
-        text.getAttributionSpansByFilter((a) => a is LinkAttribution),
-        {
-          AttributionSpan(
-            attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            start: 0,
-            end: 13,
+        expect(text.toPlainText(), "www.google.com ");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 0,
+              end: 13,
+            ),
+          },
+        );
+      });
+
+      testWidgetsOnAllPlatforms('recognizes an app URL', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
+
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
+
+        // Type an app URL.
+        await tester.typeImeText("obsidian://open?vault=MyVault");
+
+        // Type a space, to cause a linkify reaction.
+        await tester.typeImeText(" ");
+
+        // Ensure it's linkified with a URL schema.
+        var text = SuperEditorInspector.findTextInComponent("1");
+
+        expect(text.toPlainText(), "obsidian://open?vault=MyVault ");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("obsidian://open?vault=MyVault")),
+              start: 0,
+              end: 28,
+            ),
+          },
+        );
+      });
+
+      testWidgetsOnAllPlatforms('recognizes a URL without https and www and converts it to a link', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
+
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
+
+        // Type a URL without the www. It shouldn't linkify until we add a space.
+        await tester.typeImeText("google.com");
+
+        // Ensure it's not linkified yet.
+        var text = SuperEditorInspector.findTextInComponent("1");
+
+        expect(text.toPlainText(), "google.com");
+        expect(
+          text.getAttributionSpansInRange(
+            attributionFilter: (attribution) => true,
+            range: SpanRange(0, text.length - 1),
           ),
-        },
-      );
+          isEmpty,
+        );
+
+        // Type a space, to cause a linkify reaction.
+        await tester.typeImeText(" ");
+
+        // Ensure it's linkified.
+        text = SuperEditorInspector.findTextInComponent("1");
+
+        expect(text.toPlainText(), "google.com ");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://google.com")),
+              start: 0,
+              end: 9,
+            ),
+          },
+        );
+      });
+
+      testWidgetsOnDesktop('recognizes a pasted URL with www and converts it to a link', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
+
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
+
+        // Paste text with a URL.
+        tester.simulateClipboard();
+        await tester.setSimulatedClipboardContent("Hello https://www.google.com world");
+        // TODO: create and use something like tester.pressPasteAdaptive()
+        if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
+          await tester.pressCmdV();
+        } else {
+          await tester.pressCtlV();
+        }
+
+        // Ensure the URL is linkified.
+        final text = SuperEditorInspector.findTextInComponent("1");
+        expect(text.toPlainText(), "Hello https://www.google.com world");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 6,
+              end: 27,
+            ),
+          },
+        );
+      });
+
+      testWidgetsOnDesktop('recognizes a pasted URL and inserts https scheme if it is missing', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
+
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
+
+        // Paste text with a URL.
+        tester.simulateClipboard();
+        await tester.setSimulatedClipboardContent("Hello www.google.com world");
+        // TODO: create and use something like tester.pressPasteAdaptive()
+        if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
+          await tester.pressCmdV();
+        } else {
+          await tester.pressCtlV();
+        }
+
+        // Ensure it's linkified with a URL schema.
+        var text = SuperEditorInspector.findTextInComponent("1");
+
+        expect(text.toPlainText(), "Hello www.google.com world");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
+              start: 6,
+              end: 19,
+            ),
+          },
+        );
+      });
+
+      testWidgetsOnDesktop('recognizes a pasted URL without https or www and converts it to a link', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
+
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
+
+        // Paste text with a URL.
+        tester.simulateClipboard();
+        await tester.setSimulatedClipboardContent("Hello google.com world");
+        // TODO: create and use something like tester.pressPasteAdaptive()
+        if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
+          await tester.pressCmdV();
+        } else {
+          await tester.pressCtlV();
+        }
+
+        // Ensure the URL is linkified.
+        final text = SuperEditorInspector.findTextInComponent("1");
+        expect(text.toPlainText(), "Hello google.com world");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://google.com")),
+              start: 6,
+              end: 15,
+            ),
+          },
+        );
+      });
+
+      testWidgetsOnDesktop('recognizes multiple pasted URLs', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
+
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
+
+        // Paste text with multiple URLs.
+        tester.simulateClipboard();
+        await tester.setSimulatedClipboardContent(
+          "Some URLS: google.com https://google.com somebody@gmail.com mailto:somebody@gmail.com obsidian://open?vault=my-vault",
+        );
+        // TODO: create and use something like tester.pressPasteAdaptive()
+        if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
+          await tester.pressCmdV();
+        } else {
+          await tester.pressCtlV();
+        }
+
+        // Ensure all URLs were linkified.
+        final text = SuperEditorInspector.findTextInComponent("1");
+        expect(
+          text.toPlainText(),
+          "Some URLS: google.com https://google.com somebody@gmail.com mailto:somebody@gmail.com obsidian://open?vault=my-vault",
+        );
+
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://google.com")),
+              start: 11,
+              end: 20,
+            ),
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("https://google.com")),
+              start: 22,
+              end: 39,
+            ),
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("mailto:somebody@gmail.com")),
+              start: 41,
+              end: 58,
+            ),
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("mailto:somebody@gmail.com")),
+              start: 60,
+              end: 84,
+            ),
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("obsidian://open?vault=my-vault")),
+              start: 86,
+              end: 115,
+            ),
+          },
+        );
+      });
     });
 
-    testWidgetsOnAllPlatforms('recognizes a URL without https and www and converts it to a link', (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleEmptyParagraph()
-          .withInputSource(TextInputSource.ime)
-          .pump();
+    group('URI protocol >', () {
+      testWidgetsOnAllPlatforms('recognizes an email URI', (tester) async {
+        await tester //
+            .createDocument()
+            .withSingleEmptyParagraph()
+            .withInputSource(TextInputSource.ime)
+            .pump();
 
-      // Place the caret at the beginning of the empty document.
-      await tester.placeCaretInParagraph("1", 0);
+        // Place the caret at the beginning of the empty document.
+        await tester.placeCaretInParagraph("1", 0);
 
-      // Type a URL without the www. It shouldn't linkify until we add a space.
-      await tester.typeImeText("google.com");
+        // Type a URL. It shouldn't linkify until we add a space.
+        await tester.typeImeText("me@gmail.com");
 
-      // Ensure it's not linkified yet.
-      var text = SuperEditorInspector.findTextInComponent("1");
+        // Type a space, to cause a linkify reaction.
+        await tester.typeImeText(" ");
 
-      expect(text.toPlainText(), "google.com");
-      expect(
-        text.getAttributionSpansInRange(
-          attributionFilter: (attribution) => true,
-          range: SpanRange(0, text.length - 1),
-        ),
-        isEmpty,
-      );
+        // Ensure it's linkified with a URL schema.
+        var text = SuperEditorInspector.findTextInComponent("1");
 
-      // Type a space, to cause a linkify reaction.
-      await tester.typeImeText(" ");
-
-      // Ensure it's linkified.
-      text = SuperEditorInspector.findTextInComponent("1");
-
-      expect(text.toPlainText(), "google.com ");
-      expect(
-        text.getAttributionSpansByFilter((a) => a is LinkAttribution),
-        {
-          AttributionSpan(
-            attribution: LinkAttribution.fromUri(Uri.parse("https://google.com")),
-            start: 0,
-            end: 9,
-          ),
-        },
-      );
+        expect(text.toPlainText(), "me@gmail.com ");
+        expect(
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromEmail("me@gmail.com"),
+              start: 0,
+              end: 11,
+            ),
+          },
+        );
+      });
     });
 
     testWidgetsOnAllPlatforms('recognizes a second URL when typing and converts it to a link', (tester) async {
@@ -1177,113 +1416,6 @@ void main() {
             attribution: LinkAttribution.fromUri(Uri.parse("https://flutter.dev")),
             start: 27,
             end: 45,
-          ),
-        },
-      );
-    });
-
-    testWidgetsOnDesktop('recognizes a pasted URL with www and converts it to a link', (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleEmptyParagraph()
-          .withInputSource(TextInputSource.ime)
-          .pump();
-
-      // Place the caret at the beginning of the empty document.
-      await tester.placeCaretInParagraph("1", 0);
-
-      // Paste text with a URL.
-      tester.simulateClipboard();
-      await tester.setSimulatedClipboardContent("Hello https://www.google.com world");
-      // TODO: create and use something like tester.pressPasteAdaptive()
-      if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
-        await tester.pressCmdV();
-      } else {
-        await tester.pressCtlV();
-      }
-
-      // Ensure the URL is linkified.
-      final text = SuperEditorInspector.findTextInComponent("1");
-      expect(text.toPlainText(), "Hello https://www.google.com world");
-      expect(
-        text.getAttributionSpansByFilter((a) => a is LinkAttribution),
-        {
-          AttributionSpan(
-            attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            start: 6,
-            end: 27,
-          ),
-        },
-      );
-    });
-
-    testWidgetsOnDesktop('recognizes a pasted URL and inserts https scheme if it is missing', (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleEmptyParagraph()
-          .withInputSource(TextInputSource.ime)
-          .pump();
-
-      // Place the caret at the beginning of the empty document.
-      await tester.placeCaretInParagraph("1", 0);
-
-      // Paste text with a URL.
-      tester.simulateClipboard();
-      await tester.setSimulatedClipboardContent("Hello www.google.com world");
-      // TODO: create and use something like tester.pressPasteAdaptive()
-      if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
-        await tester.pressCmdV();
-      } else {
-        await tester.pressCtlV();
-      }
-
-      // Ensure it's linkified with a URL schema.
-      var text = SuperEditorInspector.findTextInComponent("1");
-      text = SuperEditorInspector.findTextInComponent("1");
-
-      expect(text.toPlainText(), "Hello www.google.com world");
-      expect(
-        text.getAttributionSpansByFilter((a) => a is LinkAttribution),
-        {
-          AttributionSpan(
-            attribution: LinkAttribution.fromUri(Uri.parse("https://www.google.com")),
-            start: 6,
-            end: 19,
-          ),
-        },
-      );
-    });
-
-    testWidgetsOnDesktop('recognizes a pasted URL without https or www and converts it to a link', (tester) async {
-      await tester //
-          .createDocument()
-          .withSingleEmptyParagraph()
-          .withInputSource(TextInputSource.ime)
-          .pump();
-
-      // Place the caret at the beginning of the empty document.
-      await tester.placeCaretInParagraph("1", 0);
-
-      // Paste text with a URL.
-      tester.simulateClipboard();
-      await tester.setSimulatedClipboardContent("Hello google.com world");
-      // TODO: create and use something like tester.pressPasteAdaptive()
-      if (debugDefaultTargetPlatformOverride == TargetPlatform.macOS) {
-        await tester.pressCmdV();
-      } else {
-        await tester.pressCtlV();
-      }
-
-      // Ensure the URL is linkified.
-      final text = SuperEditorInspector.findTextInComponent("1");
-      expect(text.toPlainText(), "Hello google.com world");
-      expect(
-        text.getAttributionSpansByFilter((a) => a is LinkAttribution),
-        {
-          AttributionSpan(
-            attribution: LinkAttribution.fromUri(Uri.parse("https://google.com")),
-            start: 6,
-            end: 15,
           ),
         },
       );
@@ -1451,20 +1583,22 @@ void main() {
 
         expect(text.toPlainText(), "www.googoooole.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
       });
 
       testWidgetsOnAllPlatforms('updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .withAddedReactions([const LinkifyReaction(updatePolicy: LinkUpdatePolicy.update)]) //
             .pump();
@@ -1481,15 +1615,16 @@ void main() {
         final text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "www.googoooole.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.googoooole.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution("${scheme}www.googoooole.com"),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('removing the attribution', (tester) async {
         await tester //
@@ -1516,9 +1651,10 @@ void main() {
 
     group('can delete characters at the beginning of a link', () {
       testWidgetsOnAllPlatforms('without updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .pump();
 
@@ -1539,20 +1675,22 @@ void main() {
 
         expect(text.toPlainText(), "google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .withAddedReactions([const LinkifyReaction(updatePolicy: LinkUpdatePolicy.update)]) //
             .pump();
@@ -1568,20 +1706,24 @@ void main() {
         await tester.pressDelete();
         await tester.pressDelete();
 
-        // Ensure the characters were delete and link attribution was updated.
+        // Ensure the characters were deleted and link attribution was updated.
+        //
+        // We expect the leading "www." to removed, but we expect to retain the
+        // scheme.
         final text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "google.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution("${scheme}google.com"),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
 
-        // Delete more 9 characters, leaving only the last "m".
+        // Delete 9 more characters, leaving only the last "m".
         await tester.pressDelete();
         await tester.pressDelete();
         await tester.pressDelete();
@@ -1596,8 +1738,8 @@ void main() {
         final textAfter = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(textAfter.toPlainText(), "m");
         expect(
-          (textAfter.getAllAttributionsAt(0).first as LinkAttribution).url.toString(),
-          "https://m",
+          (textAfter.getAllAttributionsAt(0).first as LinkAttribution).plainTextUri.toString(),
+          "${scheme}m",
         );
 
         // Press delete to remove the last character.
@@ -1605,7 +1747,7 @@ void main() {
 
         // Ensure the text was deleted.
         expect(SuperEditorInspector.findTextInComponent(doc.first.id).toPlainText(), isEmpty);
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('removing the attribution', (tester) async {
         await tester //
@@ -1635,9 +1777,10 @@ void main() {
 
     group('can delete characters in the middle of a link', () {
       testWidgetsOnAllPlatforms('without updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .pump();
 
@@ -1657,20 +1800,22 @@ void main() {
         final text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "www.g.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .withAddedReactions([const LinkifyReaction(updatePolicy: LinkUpdatePolicy.update)]) //
             .pump();
@@ -1695,15 +1840,16 @@ void main() {
         var text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "www.duckduckgo.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.duckduckgo.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.duckduckgo.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('removing the attribution', (tester) async {
         await tester //
@@ -1730,9 +1876,10 @@ void main() {
 
     group('can delete characters at the end of a link', () {
       testWidgetsOnAllPlatforms('without updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .pump();
 
@@ -1753,20 +1900,22 @@ void main() {
 
         expect(text.toPlainText(), "www.google");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .withAddedReactions([const LinkifyReaction(updatePolicy: LinkUpdatePolicy.update)]) //
             .pump();
@@ -1784,15 +1933,16 @@ void main() {
         final text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "www.google.c");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.google.c")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.google.c")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('removing the attribution', (tester) async {
         await tester //
@@ -1819,9 +1969,10 @@ void main() {
 
     group('can replace characters in the middle of a link', () {
       testWidgetsOnAllPlatforms('without updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .pump();
 
@@ -1837,20 +1988,22 @@ void main() {
         final text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "www.duckduckgo.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("www.google.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.google.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('updating the attribution', (tester) async {
+        final scheme = _urlSchemeVariant.currentValue;
         await tester //
             .createDocument()
-            .fromMarkdown("[www.google.com](www.google.com)")
+            .fromMarkdown("[www.google.com](${scheme}www.google.com)")
             .withInputSource(TextInputSource.ime)
             .withAddedReactions([const LinkifyReaction(updatePolicy: LinkUpdatePolicy.update)]) //
             .pump();
@@ -1867,15 +2020,16 @@ void main() {
         final text = SuperEditorInspector.findTextInComponent(doc.first.id);
         expect(text.toPlainText(), "www.duckduckgo.com");
         expect(
-          text.hasAttributionsThroughout(
-            attributions: {
-              LinkAttribution.fromUri(Uri.parse("https://www.duckduckgo.com")),
-            },
-            range: SpanRange(0, text.length - 1),
-          ),
-          isTrue,
+          text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+          {
+            AttributionSpan(
+              attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.duckduckgo.com")),
+              start: 0,
+              end: text.length - 1,
+            ),
+          },
         );
-      });
+      }, variant: _urlSchemeVariant);
 
       testWidgetsOnAllPlatforms('removing the attribution', (tester) async {
         await tester //
@@ -1901,9 +2055,10 @@ void main() {
     });
 
     testWidgetsOnAllPlatforms('user can delete characters at the end of a link and then keep typing', (tester) async {
+      final scheme = _urlSchemeVariant.currentValue;
       await tester //
           .createDocument()
-          .fromMarkdown("[www.google.com](www.google.com)")
+          .fromMarkdown("[www.google.com](${scheme}www.google.com)")
           .withInputSource(TextInputSource.ime)
           .pump();
 
@@ -1924,24 +2079,25 @@ void main() {
 
       expect(text.toPlainText(), "www.google.co hello");
       expect(
-        text.hasAttributionsThroughout(
-          attributions: {
-            LinkAttribution.fromUri(Uri.parse("www.google.com")),
-          },
-          range: const SpanRange(0, 12),
-        ),
-        isTrue,
+        text.getAttributionSpansByFilter((a) => a is LinkAttribution),
+        {
+          AttributionSpan(
+            attribution: LinkAttribution.fromUri(Uri.parse("${scheme}www.google.com")),
+            start: 0,
+            end: 12,
+          ),
+        },
       );
       expect(
         text.hasAttributionsThroughout(
           attributions: {
-            LinkAttribution.fromUri(Uri.parse("www.google.com")),
+            LinkAttribution.fromUri(Uri.parse("${scheme}www.google.com")),
           },
           range: SpanRange(13, text.length - 1),
         ),
         isFalse,
       );
-    });
+    }, variant: _urlSchemeVariant);
 
     testWidgetsOnAllPlatforms('does not extend link to new paragraph', (tester) async {
       await tester //
@@ -2076,3 +2232,11 @@ void main() {
     // TODO: once it's easier to configure task components (#1295), add a test that checks link attributions when inserting a new task
   });
 }
+
+/// A variety of URL schemes, including an empty scheme.
+///
+/// Comparing empty vs non-empty schemes is especially important because URL
+/// schemes are often omitted, and we need to ensure that link attribution
+/// adjustments preserve existing schemes, but that we don't add schemes when
+/// they didn't exist in the first place.
+final _urlSchemeVariant = ValueVariant({"", "https://"});

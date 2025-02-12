@@ -616,9 +616,12 @@ class SuperEditorState extends State<SuperEditor> {
             composingRegion: editContext.composer.composingRegion,
             showComposingUnderline: true,
           ),
-        // Selection changes are very volatile. Put that phase last
+        // Selection changes are very volatile. Put that phase last,
+        // just before the phases that the app wants to be at the end
         // to minimize view model recalculations.
         _docLayoutSelectionStyler,
+        for (final plugin in widget.plugins) //
+          ...plugin.appendedStylePhases,
       ],
     );
 
@@ -661,7 +664,7 @@ class SuperEditorState extends State<SuperEditor> {
       widget.keyboardActions ??
       (inputSource == TextInputSource.ime ? defaultImeKeyboardActions : defaultKeyboardActions);
 
-  void _openSoftareKeyboard() {
+  void _openSoftwareKeyboard() {
     if (!_softwareKeyboardController.hasDelegate) {
       // There is no IME connection. It isn't possible to request the keyboard.
       return;
@@ -877,7 +880,11 @@ class SuperEditorState extends State<SuperEditor> {
           getDocumentLayout: () => editContext.documentLayout,
           selectionChanges: editContext.composer.selectionChanges,
           selectionNotifier: editContext.composer.selectionNotifier,
-          contentTapHandlers: _contentTapHandlers,
+          contentTapHandlers: [
+            ..._contentTapHandlers ?? [],
+            for (final plugin in widget.plugins) //
+              ...plugin.contentTapHandlers,
+          ],
           autoScroller: _autoScrollController,
           fillViewport: fillViewport,
           showDebugPaint: widget.debugPaint.gestures,
@@ -891,8 +898,12 @@ class SuperEditorState extends State<SuperEditor> {
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
           openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
-          openSoftwareKeyboard: _openSoftareKeyboard,
-          contentTapHandlers: _contentTapHandlers,
+          openSoftwareKeyboard: _openSoftwareKeyboard,
+          contentTapHandlers: [
+            ..._contentTapHandlers ?? [],
+            for (final plugin in widget.plugins) //
+              ...plugin.contentTapHandlers,
+          ],
           scrollController: _scrollController,
           dragHandleAutoScroller: _dragHandleAutoScroller,
           fillViewport: fillViewport,
@@ -907,9 +918,13 @@ class SuperEditorState extends State<SuperEditor> {
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
           openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
-          openSoftwareKeyboard: _openSoftareKeyboard,
+          openSoftwareKeyboard: _openSoftwareKeyboard,
           isImeConnected: _isImeConnected,
-          contentTapHandlers: _contentTapHandlers,
+          contentTapHandlers: [
+            ..._contentTapHandlers ?? [],
+            for (final plugin in widget.plugins) //
+              ...plugin.contentTapHandlers,
+          ],
           scrollController: _scrollController,
           dragHandleAutoScroller: _dragHandleAutoScroller,
           fillViewport: fillViewport,
@@ -1160,6 +1175,16 @@ abstract class SuperEditorPlugin {
 
   /// Additional overlay [SuperEditorLayerBuilder]s that will be added to a given [SuperEditor].
   List<SuperEditorLayerBuilder> get documentOverlayBuilders => [];
+
+  /// Optional handlers that respond to taps on content, e.g., opening
+  /// a link when the user taps on text with a link attribution.
+  ///
+  /// If a handler returns [TapHandlingInstruction.halt], no subsequent handlers
+  /// nor the default tap behavior will be executed.
+  List<ContentTapDelegate> get contentTapHandlers => const [];
+
+  /// Custom style phases that are added to the very end of the [SuperEditor] style phases.
+  List<SingleColumnLayoutStylePhase> get appendedStylePhases => const [];
 }
 
 /// A collection of policies that dictate how a [SuperEditor]'s selection will change
@@ -1411,18 +1436,22 @@ final defaultImeKeyboardActions = <DocumentKeyboardAction>[
   selectAllWhenCmdAIsPressed,
   cmdBToToggleBold,
   cmdIToToggleItalics,
+  // All handlers that use backspace should be placed before `doNothingWithBackspaceOnWeb`,
+  // otherwise they will not run on web.
+  backspaceToUnIndentListItem,
+  backspaceToUnIndentParagraph,
+  backspaceToUnIndentTask,
+  backspaceToConvertTaskToParagraph,
+  backspaceToClearParagraphBlockType,
+  // We handled all shortcuts that care about backspace. Let the browser IME handle the
+  // backspace to perform text deletion.
   doNothingWithBackspaceOnWeb,
   doNothingWithCtrlOrCmdAndZOnWeb,
   tabToIndentTask,
   shiftTabToUnIndentTask,
-  backspaceToUnIndentTask,
   tabToIndentParagraph,
   shiftTabToUnIndentParagraph,
-  backspaceToUnIndentParagraph,
-  backspaceToConvertTaskToParagraph,
-  backspaceToUnIndentListItem,
   enterToUnIndentParagraph,
-  backspaceToClearParagraphBlockType,
   deleteDownstreamCharacterWithCtrlDeleteOnMac,
   scrollOnCtrlOrCmdAndHomeKeyPress,
   scrollOnCtrlOrCmdAndEndKeyPress,

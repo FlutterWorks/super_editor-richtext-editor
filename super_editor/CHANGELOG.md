@@ -1,11 +1,41 @@
-## [0.3.0-dev.19] - Feb 11, 2024
+## [0.3.0-dev.25] - June 6, 2025
+ * FIX: Crash when connecting to IME (because Flutter broke everything with latest release).
+ * ADJUSTMENT: Added a couple methods to the spelling and grammar plugin for working with spelling errors.
+
+## [0.3.0-dev.24] - May 26, 2025
+ * FIX: Text is duplicated when typing with styles applied.
+ * FIX: Ordered list item numerals are mis-aligned with content text.
+ * FIX: Toolbar disappears after user presses "Select All", preventing selection of "copy" or "paste".
+ * ADJUSTMENT: Add option to bypass `MediaQuery` and user `super_keyboard` to monitor keyboard
+   height in a `KeyboardPanelScaffold`. This was added to work around a possible `MediaQuery`
+   glitch on Android due to an app mishandling the Android lifecycle/permission requirements.
+ * FIX: Editor overlays obscure everything below them when using Dev Tools with layout outlines.
+
+## [0.3.0-dev.23] - Apr 3, 2025
+ * FIX: iOS native toolbar "select all" now selects all document content instead of just the paragraph.
+ * FIX: Pressing `enter` to split list items works again.
+ * ADJUSTMENT: Prevent Flutter's invalidation of widget span layout just because the widget
+   changes - instead we delegate to Flutter's standard render object layout invalidation mechanism.
+
+## [0.3.0-dev.22] - Mar 28, 2025
+ * FIX: `MessagePageScaffold` - Prevent possible negative layout constraints on bottom sheet.
+
+## [0.3.0-dev.21] - Mar 27, 2025
+ * FEATURE: Chat - Added a `MessagePageScaffold` to create chat pages with a bottom mounted editor.
+ * FEATURE: List items support inline widgets.
+ * FIX: Super Reader - Crash when rotating phone with an expanded selection.
+
+## [0.3.0-dev.20] - Mar 7, 2025
+ * FIX: Keyboard safe area rare layout exception due to dirty ancestor layout.
+
+## [0.3.0-dev.19] - Feb 11, 2025
  * FIX: Immutability error in the spelling and grammar styler.
  * ADJUSTMENT: Upgrade to `attributed_text` `v0.4.4` (with some fixes to inline placeholders).
 
-## [0.3.0-dev.18] - Jan 30, 2024
+## [0.3.0-dev.18] - Jan 30, 2025
  * ADJUSTMENT: Upgrade to `attributed_text` `v0.4.3` (with fixes to per-character lookup).
 
-## [0.3.0-dev.17] - Jan 28, 2024
+## [0.3.0-dev.17] - Jan 28, 2025
  * FEATURE: Inline widgets for `SuperTextField`.
  * FIX: `SuperEditor`: Selecting text with inline widgets and toggling styles deleted the inline widgets.
  * FIX: Caret place wrong with RTL languages.
@@ -13,18 +43,18 @@
  * FIX: Backspace to un-indent on Web.
  * ADJUSTMENT: Tasks are rendered by default in `SuperReader`.
 
-## [0.3.0-dev.16] - Jan 24, 2024
+## [0.3.0-dev.16] - Jan 24, 2025
  * FIX: `KeyboardScaffoldSafeArea` in rare circumstances was trying to use `NaN` for bottom insets.
  * FIX: On Safari/Firefox, double tapping on text closing the IME connection.
 
-## [0.3.0-dev.15] - Jan 17, 2024
+## [0.3.0-dev.15] - Jan 17, 2025
  * FEATURE: Spellcheck for mobile (when using the `super_editor_spellcheck` plugin).
  * ADJUSTMENT: Upgrade to `attributed_text` `v0.4.2` (with some fixes to inline placeholders).
 
-## [0.3.0-dev.14] - Jan 14, 2024
+## [0.3.0-dev.14] - Jan 14, 2025
  * FIX: `KeyboardScaffoldSafeArea` breaks and defers to `MediaQuery` when there's only one in the tree.
 
-## [0.3.0-dev.13] - Jan 10, 2024
+## [0.3.0-dev.13] - Jan 10, 2025
  * BREAKING: All `DocumentNode`s are now immutable. To change a node, it must be copied and replaced.
  * BREAKING: Newline insertion behavior is now configurable.
    * All newlines are inserted with explicit `EditRequest`s, e.g., `InsertNewlineRequest`, `InsertSoftNewlineRequest`.

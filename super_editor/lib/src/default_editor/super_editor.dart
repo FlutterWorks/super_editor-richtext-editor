@@ -670,7 +670,7 @@ class SuperEditorState extends State<SuperEditor> {
       return;
     }
 
-    _softwareKeyboardController.open();
+    _softwareKeyboardController.open(viewId: View.of(context).viewId);
   }
 
   @override
@@ -898,6 +898,7 @@ class SuperEditorState extends State<SuperEditor> {
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
           openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
+          openKeyboardOnSelectionChange: widget.imePolicies.openKeyboardOnSelectionChange,
           openSoftwareKeyboard: _openSoftwareKeyboard,
           contentTapHandlers: [
             ..._contentTapHandlers ?? [],
@@ -918,6 +919,7 @@ class SuperEditorState extends State<SuperEditor> {
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
           openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
+          openKeyboardOnSelectionChange: widget.imePolicies.openKeyboardOnSelectionChange,
           openSoftwareKeyboard: _openSoftwareKeyboard,
           isImeConnected: _isImeConnected,
           contentTapHandlers: [
@@ -1095,7 +1097,6 @@ class DefaultAndroidEditorToolbar extends StatelessWidget {
 
   void _selectAll() {
     editorOps.selectAll();
-    editorControlsController.hideToolbar();
   }
 }
 

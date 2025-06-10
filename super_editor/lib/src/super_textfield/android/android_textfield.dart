@@ -1,4 +1,3 @@
-import 'package:attributed_text/attributed_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:follow_the_leader/follow_the_leader.dart';
@@ -270,6 +269,7 @@ class SuperAndroidTextFieldState extends State<SuperAndroidTextField>
         widget.textInputAction != null &&
         _textEditingController.isAttachedToIme) {
       _textEditingController.updateTextInputConfiguration(
+        viewId: View.of(context).viewId,
         textInputAction: widget.textInputAction!,
         textInputType: _isMultiline ? TextInputType.multiline : TextInputType.text,
       );
@@ -280,6 +280,7 @@ class SuperAndroidTextFieldState extends State<SuperAndroidTextField>
         (oldWidget.imeConfiguration == null || !widget.imeConfiguration!.isEquivalentTo(oldWidget.imeConfiguration!)) &&
         _textEditingController.isAttachedToIme) {
       _textEditingController.updateTextInputConfiguration(
+        viewId: View.of(context).viewId,
         textInputAction: widget.imeConfiguration!.inputAction,
         textInputType: widget.imeConfiguration!.inputType,
         autocorrect: widget.imeConfiguration!.autocorrect,
@@ -433,6 +434,7 @@ class SuperAndroidTextFieldState extends State<SuperAndroidTextField>
               _textEditingController.attachToImeWithConfig(widget.imeConfiguration!);
             } else {
               _textEditingController.attachToIme(
+                viewId: View.of(context).viewId,
                 textInputAction: widget.textInputAction ?? TextInputAction.done,
                 textInputType: _isMultiline ? TextInputType.multiline : TextInputType.text,
               );
@@ -573,14 +575,6 @@ class SuperAndroidTextFieldState extends State<SuperAndroidTextField>
 
   @override
   Widget build(BuildContext context) {
-    return OverlayPortal(
-      controller: _popoverController,
-      overlayChildBuilder: _buildPopoverToolbar,
-      child: _buildTextField(),
-    );
-  }
-
-  Widget _buildTextField() {
     return TapRegion(
       groupId: widget.tapRegionGroupId,
       child: Focus(
@@ -688,13 +682,17 @@ class SuperAndroidTextFieldState extends State<SuperAndroidTextField>
             return const SizedBox();
           }
 
-          return TextLayoutCaret(
-            textLayout: textLayout,
-            style: widget.caretStyle,
-            position: _textEditingController.selection.isCollapsed //
-                ? _textEditingController.selection.extent
-                : null,
-            blinkController: _caretBlinkController,
+          return OverlayPortal(
+            controller: _popoverController,
+            overlayChildBuilder: _buildPopoverToolbar,
+            child: TextLayoutCaret(
+              textLayout: textLayout,
+              style: widget.caretStyle,
+              position: _textEditingController.selection.isCollapsed //
+                  ? _textEditingController.selection.extent
+                  : null,
+              blinkController: _caretBlinkController,
+            ),
           );
         },
       ),

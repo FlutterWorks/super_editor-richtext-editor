@@ -209,6 +209,7 @@ class ListItemComponentBuilder implements ComponentBuilder {
         selectionColor: componentViewModel.selectionColor,
         highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
         underlines: componentViewModel.createUnderlines(),
+        inlineWidgetBuilders: componentViewModel.inlineWidgetBuilders,
       );
     } else if (componentViewModel is OrderedListItemComponentViewModel) {
       return OrderedListItemComponent(
@@ -224,6 +225,7 @@ class ListItemComponentBuilder implements ComponentBuilder {
         selectionColor: componentViewModel.selectionColor,
         highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
         underlines: componentViewModel.createUnderlines(),
+        inlineWidgetBuilders: componentViewModel.inlineWidgetBuilders,
       );
     }
 
@@ -378,6 +380,7 @@ class UnorderedListItemComponentViewModel extends ListItemComponentViewModel {
       spellingErrors: List.from(spellingErrors),
       grammarErrorUnderlineStyle: grammarErrorUnderlineStyle,
       grammarErrors: List.from(grammarErrors),
+      inlineWidgetBuilders: inlineWidgetBuilders,
     );
   }
 
@@ -447,6 +450,7 @@ class OrderedListItemComponentViewModel extends ListItemComponentViewModel {
       spellingErrors: List.from(spellingErrors),
       grammarErrorUnderlineStyle: grammarErrorUnderlineStyle,
       grammarErrors: List.from(grammarErrors),
+      inlineWidgetBuilders: inlineWidgetBuilders,
     );
   }
 
@@ -805,7 +809,14 @@ Widget _defaultOrderedListItemNumeralBuilder(BuildContext context, OrderedListIt
   // also contain a FontSizeAttribution, which overrides the stylesheet. Use the attributions
   // of the first character to determine the text style.
   final attributions = component.text.getAllAttributionsAt(0).toSet();
-  final textStyle = component.styleBuilder(attributions);
+
+  // We set inherit to false because, when it's true, the Text widget merges the
+  // textStyle with the default textStyle. This might cause it to apply a font family,
+  // letter spacing, etc. That might cause the numeral to be misaligned with the
+  // list item's text.
+  final textStyle = component.styleBuilder(attributions).copyWith(
+        inherit: false,
+      );
 
   return OverflowBox(
     maxWidth: double.infinity,

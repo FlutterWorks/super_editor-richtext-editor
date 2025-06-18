@@ -22,6 +22,7 @@ import 'package:super_editor/src/default_editor/layout_single_column/_styler_com
 import 'package:super_editor/src/default_editor/list_items.dart';
 import 'package:super_editor/src/default_editor/tap_handlers/tap_handlers.dart';
 import 'package:super_editor/src/default_editor/tasks.dart';
+import 'package:super_editor/src/default_editor/text/custom_underlines.dart';
 import 'package:super_editor/src/infrastructure/content_layers.dart';
 import 'package:super_editor/src/infrastructure/documents/document_scaffold.dart';
 import 'package:super_editor/src/infrastructure/documents/document_scroller.dart';
@@ -379,6 +380,7 @@ class SuperEditorState extends State<SuperEditor> {
   SingleColumnLayoutPresenter? _docLayoutPresenter;
   late SingleColumnStylesheetStyler _docStylesheetStyler;
   late SingleColumnLayoutCustomComponentStyler _docLayoutPerComponentBlockStyler;
+  final _customUnderlineStyler = CustomUnderlineStyler();
   late SingleColumnLayoutSelectionStyler _docLayoutSelectionStyler;
 
   @visibleForTesting
@@ -609,6 +611,7 @@ class SuperEditorState extends State<SuperEditor> {
       pipeline: [
         _docStylesheetStyler,
         _docLayoutPerComponentBlockStyler,
+        _customUnderlineStyler,
         ...widget.customStylePhases,
         if (showComposingUnderline)
           SingleColumnLayoutComposingRegionStyler(
@@ -1667,7 +1670,18 @@ final defaultStylesheet = Stylesheet(
 );
 
 TextStyle defaultInlineTextStyler(Set<Attribution> attributions, TextStyle existingStyle) {
-  return existingStyle.merge(defaultStyleBuilder(attributions));
+  var newStyle = existingStyle.merge(defaultStyleBuilder(attributions));
+
+  // We apply opacity here instead of defaultStyleBuilder because opacity requires
+  // a color to be defined to apply itself.
+  final opacityAttribution = attributions.whereType<OpacityAttribution>().firstOrNull;
+  if (opacityAttribution != null) {
+    newStyle = newStyle.copyWith(
+      color: newStyle.color!.withValues(alpha: opacityAttribution.opacity),
+    );
+  }
+
+  return newStyle;
 }
 
 /// Creates [TextStyles] for the standard [SuperEditor].
